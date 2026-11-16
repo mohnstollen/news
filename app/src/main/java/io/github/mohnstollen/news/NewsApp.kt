@@ -13,7 +13,9 @@ import io.github.mohnstollen.news.work.RefreshWorker
 
 class AppContainer(app: Application) {
     private val http = newHttpClient()
-    private val db = Room.databaseBuilder(app, AppDatabase::class.java, "news.db").build()
+    private val db = Room.databaseBuilder(app, AppDatabase::class.java, "news.db")
+        .addMigrations(AppDatabase.MIGRATION_1_2)
+        .build()
     val settings = SettingsStore(app)
     val repository = Repository(db, FeedFetcher(http), FullTextExtractor(http), settings)
     val sync = SyncManager(http, settings, repository)

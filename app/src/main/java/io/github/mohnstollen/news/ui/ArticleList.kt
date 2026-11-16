@@ -5,6 +5,7 @@ import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,11 +22,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.automirrored.filled.List
@@ -35,6 +40,7 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -48,6 +54,8 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -65,8 +73,13 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -75,14 +88,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import io.github.mohnstollen.news.data.ArticleListItem
 import io.github.mohnstollen.news.data.FeedWithUnread
+import io.github.mohnstollen.news.data.SearchQuery
 import io.github.mohnstollen.news.ui.MainViewModel.ListScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
@@ -123,23 +139,78 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val starredTotal = repo.articleDao.observeStarredCount()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
-    /** null while loading. */
-    @OptIn(ExperimentalCoroutinesApi::class)
+    /** Quick filter: only articles published within [RECENT_WINDOW_MS]. */
+    private val _recentOnly = MutableStateFlow(false)
+    val recentOnly: StateFlow<Boolean> = _recentOnly
+
+    /** Quick filter of the "all articles" list: only this folder. */
+    private val _folder = MutableStateFlow<String?>(null)
+    val folder: StateFlow<String?> = _folder
+
+    fun setRecentOnly(value: Boolean) {
+        keepVisible.value = emptySet()
+        _recentOnly.value = value
+    }
+
+    fun setFolder(value: String?) {
+        keepVisible.value = emptySet()
+        _folder.value = value
+    }
+
+    /** What is typed into the search field; null while the search is closed. */
+    private val _search = MutableStateFlow<String?>(null)
+    val search: StateFlow<String?> = _search
+
+    /** null while loading. While searching, the hits within the current scope, read ones included. */
+    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     val articles: StateFlow<List<ArticleListItem>?> = _scope
-        .flatMapLatest { scope ->
+        .combine(
+            _search.map { it?.let(SearchQuery::toMatch) }.distinctUntilChanged()
+                // Wait for a pause in typing; closing the search takes effect at once.
+                .debounce { if (it == null) 0L else 250L },
+        ) { scope, match -> scope to match }
+        .flatMapLatest { (scope, match) ->
             val filter = prefs.map { it.unreadOnly to it.newestFirst }.distinctUntilChanged()
+            val feedId = (scope as? ListScope.Single)?.feedId
+            if (match != null) {
+                return@flatMapLatest combine(
+                    repo.articleDao.observeSearch(match, feedId, scope is ListScope.Starred),
+                    filter,
+                ) { hits, (_, newestFirst) -> if (newestFirst) hits else hits.asReversed() }
+            }
             combine(
                 repo.articleDao.observeList((scope as? ListScope.Single)?.feedId, scope is ListScope.Starred),
                 filter,
                 keepVisible,
-            ) { all, (unreadOnly, newestFirst), keep ->
-                val filtered =
-                    if (unreadOnly && scope !is ListScope.Starred) all.filter { !it.read || it.id in keep } else all
+                _recentOnly,
+                _folder,
+            ) { all, (unreadOnly, newestFirst), keep, recentOnly, folder ->
+                // The quick filters belong to the article lists; the starred list shows everything.
+                val filterable = scope !is ListScope.Starred
+                val since = if (recentOnly && filterable) System.currentTimeMillis() - RECENT_WINDOW_MS else null
+                val inFolder = folder.takeIf { scope is ListScope.All }
+                val filtered = all.filter { item ->
+                    (!unreadOnly || !filterable || !item.read || item.id in keep) &&
+                        (since == null || item.pubDate >= since) &&
+                        (inFolder == null || item.category == inFolder)
+                }
                 if (newestFirst) filtered else filtered.asReversed()
             }
         }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    fun openSearch() {
+        if (_search.value == null) _search.value = ""
+    }
+
+    fun closeSearch() {
+        _search.value = null
+    }
+
+    fun setSearch(text: String) {
+        _search.value = text
+    }
 
     fun select(scope: ListScope) {
         keepVisible.value = emptySet()
@@ -169,12 +240,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { repo.setStarred(item.id, !item.starred) }
     }
 
+    /** With a "new" or folder filter on, only what the list shows is marked. */
+    fun narrowed(): Boolean {
+        val scope = _scope.value
+        return (_recentOnly.value && scope !is ListScope.Starred) || (_folder.value != null && scope is ListScope.All)
+    }
+
     fun markAllRead() {
         val scope = _scope.value
+        val shown = if (narrowed()) articles.value.orEmpty().filter { !it.read }.map { it.id } else null
         keepVisible.value = emptySet()
         viewModelScope.launch {
-            repo.articleDao.markAllRead((scope as? ListScope.Single)?.feedId, scope is ListScope.Starred)
+            if (shown != null) repo.setRead(shown, true)
+            else repo.articleDao.markAllRead((scope as? ListScope.Single)?.feedId, scope is ListScope.Starred)
         }
+    }
+
+    companion object {
+        const val RECENT_WINDOW_MS = 3 * 60 * 60 * 1000L
     }
 
     fun refresh() {
@@ -213,6 +296,19 @@ fun ArticleListScreen(
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val unreadTotal by vm.unreadTotal.collectAsStateWithLifecycle()
     val starredTotal by vm.starredTotal.collectAsStateWithLifecycle()
+    val search by vm.search.collectAsStateWithLifecycle()
+    val searching = search != null
+    val recentOnly by vm.recentOnly.collectAsStateWithLifecycle()
+    val folder by vm.folder.collectAsStateWithLifecycle()
+    val folders = remember(feeds) {
+        feeds.mapNotNull { it.feed.category }.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
+    }
+    // The chosen folder is gone, e.g. its last feed was deleted or moved.
+    LaunchedEffect(folder, folders) {
+        if (folder != null && feeds.isNotEmpty() && folder !in folders) vm.setFolder(null)
+    }
+    val narrowed = (recentOnly && scope !is ListScope.Starred) || (folder != null && scope == ListScope.All)
+    val hasQuery = !search.isNullOrBlank()
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val coroutineScope = rememberCoroutineScope()
@@ -221,6 +317,7 @@ fun ArticleListScreen(
     var confirmMarkAll by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
+    BackHandler(enabled = searching) { vm.closeSearch() }
     BackHandler(enabled = drawerState.isOpen) { coroutineScope.launch { drawerState.close() } }
     // The selected feed was deleted in the meantime.
     LaunchedEffect(scope, feeds) {
@@ -262,7 +359,14 @@ fun ArticleListScreen(
             modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
             snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
-                TopAppBar(
+                if (searching) {
+                    SearchBar(
+                        text = search.orEmpty(),
+                        placeholder = if (scope == ListScope.All) "Alle Artikel durchsuchen" else "In „$title“ suchen",
+                        onChange = vm::setSearch,
+                        onClose = vm::closeSearch,
+                    )
+                } else TopAppBar(
                     title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     scrollBehavior = scrollBehavior,
                     navigationIcon = {
@@ -271,6 +375,9 @@ fun ArticleListScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = vm::openSearch) {
+                            Icon(Icons.Default.Search, contentDescription = "Suchen")
+                        }
                         IconButton(onClick = { confirmMarkAll = true }) {
                             Icon(AppIcons.DoneAll, contentDescription = "Alle als gelesen markieren")
                         }
@@ -288,9 +395,6 @@ fun ArticleListScreen(
                                 vm.setNewestFirst(false); menuOpen = false
                             }
                             HorizontalDivider()
-                            CheckMenuItem("Nur ungelesene anzeigen", prefs.unreadOnly) {
-                                vm.setUnreadOnly(!prefs.unreadOnly); menuOpen = false
-                            }
                             CheckMenuItem("Beim Scrollen als gelesen markieren", prefs.markReadOnScroll) {
                                 vm.setMarkReadOnScroll(!prefs.markReadOnScroll); menuOpen = false
                             }
@@ -299,27 +403,43 @@ fun ArticleListScreen(
                 )
             },
         ) { padding ->
+          Column(Modifier.padding(padding).fillMaxSize()) {
+            if (!searching && scope !is ListScope.Starred && feeds.isNotEmpty()) {
+                QuickFilters(
+                    unreadOnly = prefs.unreadOnly,
+                    onUnreadOnly = vm::setUnreadOnly,
+                    recentOnly = recentOnly,
+                    onRecentOnly = vm::setRecentOnly,
+                    // Folders only make sense across feeds.
+                    folders = if (scope == ListScope.All) folders else emptyList(),
+                    folder = folder,
+                    onFolder = vm::setFolder,
+                )
+            }
             PullToRefreshBox(
                 isRefreshing = refreshing,
                 onRefresh = vm::refresh,
-                modifier = Modifier.padding(padding).fillMaxSize(),
+                modifier = Modifier.fillMaxSize(),
             ) {
                 val items = articles
                 when {
                     items == null -> Unit
                     items.isEmpty() -> EmptyState(
                         text = when {
+                            hasQuery -> "Keine Treffer für „${search.orEmpty().trim()}“."
                             feeds.isEmpty() -> "Noch keine Feeds abonniert."
                             scope is ListScope.Starred -> "Noch keine Artikel gemerkt.\nTippe bei einem Artikel auf den Stern."
+                            narrowed -> "Keine Artikel für diese Filter."
                             prefs.unreadOnly -> "Keine ungelesenen Artikel."
                             else -> "Keine Artikel. Zum Aktualisieren nach unten ziehen."
                         },
-                        action = if (feeds.isEmpty()) "Feed hinzufügen" to onOpenFeeds else null,
+                        action = if (feeds.isEmpty() && !hasQuery) "Feed hinzufügen" to onOpenFeeds else null,
                     )
                     else -> ArticleList(
                         items = items,
-                        listKey = scope,
-                        markReadOnScroll = prefs.markReadOnScroll,
+                        // Search results keep their own scroll position, and browsing them marks nothing.
+                        listKey = if (hasQuery) "search" to scope else Triple(scope, recentOnly, folder),
+                        markReadOnScroll = prefs.markReadOnScroll && !hasQuery,
                         onScrolledPast = vm::markRead,
                         onOpen = { onOpenArticle(it.id) },
                         onToggleRead = vm::toggleRead,
@@ -327,6 +447,7 @@ fun ArticleListScreen(
                     )
                 }
             }
+          }
         }
     }
 
@@ -334,13 +455,110 @@ fun ArticleListScreen(
         AlertDialog(
             onDismissRequest = { confirmMarkAll = false },
             title = { Text("Als gelesen markieren?") },
-            text = { Text("Alle Artikel in „$title“ werden als gelesen markiert.") },
+            text = {
+                Text(
+                    if (narrowed) "Alle Artikel, die die Filter gerade anzeigen, werden als gelesen markiert."
+                    else "Alle Artikel in „$title“ werden als gelesen markiert.",
+                )
+            },
             confirmButton = {
                 TextButton(onClick = { vm.markAllRead(); confirmMarkAll = false }) { Text("Markieren") }
             },
             dismissButton = { TextButton(onClick = { confirmMarkAll = false }) { Text("Abbrechen") } },
         )
     }
+}
+
+/** Chips above the list: unread only, published in the last hours, one folder. They combine. */
+@Composable
+private fun QuickFilters(
+    unreadOnly: Boolean,
+    onUnreadOnly: (Boolean) -> Unit,
+    recentOnly: Boolean,
+    onRecentOnly: (Boolean) -> Unit,
+    folders: List<String>,
+    folder: String?,
+    onFolder: (String?) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilterChip(
+            selected = unreadOnly,
+            onClick = { onUnreadOnly(!unreadOnly) },
+            label = { Text("Ungelesen") },
+            leadingIcon = if (unreadOnly) checkIcon else null,
+        )
+        FilterChip(
+            selected = recentOnly,
+            onClick = { onRecentOnly(!recentOnly) },
+            label = { Text("Neu (${MainViewModel.RECENT_WINDOW_MS / 3_600_000} Std.)") },
+            leadingIcon = if (recentOnly) checkIcon else null,
+        )
+        if (folders.isNotEmpty()) {
+            var open by remember { mutableStateOf(false) }
+            Box {
+                FilterChip(
+                    selected = folder != null,
+                    onClick = { open = true },
+                    label = { Text(folder ?: "Ordner", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    leadingIcon = if (folder != null) checkIcon else null,
+                    trailingIcon = {
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Ordner wählen", Modifier.size(18.dp))
+                    },
+                )
+                DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                    DropdownMenuItem(text = { Text("Alle Ordner") }, onClick = { onFolder(null); open = false })
+                    folders.forEach { name ->
+                        DropdownMenuItem(text = { Text(name) }, onClick = { onFolder(name); open = false })
+                    }
+                }
+            }
+        }
+    }
+}
+
+private val checkIcon: @Composable () -> Unit = {
+    Icon(Icons.Default.Check, contentDescription = null, Modifier.size(18.dp))
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SearchBar(text: String, placeholder: String, onChange: (String) -> Unit, onClose: () -> Unit) {
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    TopAppBar(
+        navigationIcon = {
+            IconButton(onClick = onClose) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Suche schließen")
+            }
+        },
+        title = {
+            TextField(
+                value = text,
+                onValueChange = onChange,
+                placeholder = { Text(placeholder, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                ),
+                modifier = Modifier.fillMaxWidth().focusRequester(focus),
+            )
+        },
+        actions = {
+            if (text.isNotEmpty()) {
+                IconButton(onClick = { onChange("") }) {
+                    Icon(Icons.Default.Close, contentDescription = "Eingabe löschen")
+                }
+            }
+        },
+    )
 }
 
 @Composable

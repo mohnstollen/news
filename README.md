@@ -7,7 +7,8 @@ RSS-/Atom-Reader für Android (ab Android 8.0), geschrieben in Kotlin mit Jetpac
 - **Feeds** hinzufügen (mit Prüfung der Adresse; bei einer normalen Website wird der Feed
   gesucht), bearbeiten, in Ordner sortieren und löschen
 - **Anzeige**: alle Artikel, ein einzelner Feed oder die gemerkten Artikel; Sortierung nach
-  Datum (neueste oder älteste zuerst); optional nur ungelesene
+  Datum (neueste oder älteste zuerst); Schnellfilter für Ungelesene, Artikel der letzten
+  drei Stunden und einen Ordner
 - **Gelesen-Status**: automatisch beim Vorbeiscrollen (abschaltbar), per langem Druck auf einen
   Artikel, oder alle Artikel der aktuellen Ansicht auf einmal
 - **Merken** (Stern), **Notiz** (Stift) und **Teilen** für jeden Artikel
@@ -15,6 +16,10 @@ RSS-/Atom-Reader für Android (ab Android 8.0), geschrieben in Kotlin mit Jetpac
   lässt sich pro Artikel laden oder pro Feed automatisch bei jedem Update
 - **Aktualisierung** im Hintergrund in einstellbarem Intervall (Standard 60 Minuten, auf Wunsch
   nur im WLAN) oder nur manuell
+- **Suche** über Titel, Text, Volltext und Notizen, in allen Artikeln oder im gewählten Feed
+- **Benachrichtigung** bei neuen Artikeln nach einem Hintergrund-Update (abschaltbar, auch pro Feed)
+- **Widget** für den Startbildschirm mit den neuesten ungelesenen Artikeln und eigenem,
+  einstellbarem Aktualisierungsintervall
 - **OPML** Import und Export
 - **Nextcloud** (WebDAV): gleicht Feeds, gemerkte Artikel und Notizen zwischen Geräten ab
 
@@ -48,11 +53,13 @@ Keystore abgelegt.
 
 | Pfad | Inhalt |
 | --- | --- |
-| `data/Database.kt` | Room-Datenbank: Feeds, Artikel, Löschmarker |
+| `data/Database.kt` | Room-Datenbank: Feeds, Artikel, Löschmarker, Suchindex |
 | `data/FeedParser.kt` | RSS 2.0, RSS 1.0 (RDF) und Atom, Datumsformate |
 | `data/Network.kt` | Abruf, Feed-Suche auf Webseiten, Volltext-Extraktion |
 | `data/Opml.kt` | OPML lesen und schreiben |
 | `data/Sync.kt` | WebDAV-Client und Abgleich |
 | `data/Repository.kt` | Aktualisieren, Abonnements, Artikelstatus |
 | `work/RefreshWorker.kt` | Hintergrund-Aktualisierung mit WorkManager |
+| `work/Notifier.kt` | Benachrichtigung über neue Artikel |
+| `widget/NewsWidget.kt` | Startbildschirm-Widget |
 | `ui/` | Oberfläche: Artikelliste, Leseansicht, Feeds, Einstellungen |

@@ -16,12 +16,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -131,7 +128,6 @@ fun ReaderScreen(onBack: () -> Unit, vm: ReaderViewModel = viewModel()) {
     val preferFullText by vm.preferFullText.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
-    var menuOpen by remember { mutableStateOf(false) }
     var noteOpen by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
@@ -174,35 +170,31 @@ fun ReaderScreen(onBack: () -> Unit, vm: ReaderViewModel = viewModel()) {
                     }) {
                         Icon(Icons.Default.Share, contentDescription = "Teilen")
                     }
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "Mehr")
-                    }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        if (a.link != null) {
-                            when {
-                                a.fullText == null -> DropdownMenuItem(
-                                    text = { Text("Volltext laden") },
-                                    enabled = !loading,
-                                    onClick = { menuOpen = false; vm.loadFullText() },
-                                )
-                                preferFullText -> DropdownMenuItem(
-                                    text = { Text("Feed-Text anzeigen") },
-                                    onClick = { menuOpen = false; vm.preferFullText.value = false },
-                                )
-                                else -> DropdownMenuItem(
-                                    text = { Text("Volltext anzeigen") },
-                                    onClick = { menuOpen = false; vm.preferFullText.value = true },
-                                )
-                            }
-                            DropdownMenuItem(
-                                text = { Text("Im Browser öffnen") },
-                                onClick = { menuOpen = false; context.openInBrowser(a.link) },
+                    if (a.link != null) {
+                        val showsFullText = a.fullText != null && preferFullText
+                        IconButton(
+                            enabled = !loading,
+                            onClick = {
+                                when {
+                                    a.fullText == null -> vm.loadFullText()
+                                    else -> vm.preferFullText.value = !preferFullText
+                                }
+                            },
+                        ) {
+                            Icon(
+                                AppIcons.FullText,
+                                contentDescription = when {
+                                    a.fullText == null -> "Volltext laden"
+                                    showsFullText -> "Feed-Text anzeigen"
+                                    else -> "Volltext anzeigen"
+                                },
+                                tint = if (showsFullText) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        DropdownMenuItem(
-                            text = { Text("Als ungelesen markieren") },
-                            onClick = { menuOpen = false; vm.markUnread(onBack) },
-                        )
+                    }
+                    IconButton(onClick = { vm.markUnread(onBack) }) {
+                        Icon(AppIcons.MarkUnread, contentDescription = "Als ungelesen markieren")
                     }
                 },
             )
@@ -295,7 +287,7 @@ private fun ArticleWebView(html: String, baseUrl: String?, modifier: Modifier) {
 
 private fun Color.css(): String = String.format("#%06X", 0xFFFFFF and toArgb())
 
-private fun articleHtml(
+internal fun articleHtml(
     article: Article,
     feedTitle: String?,
     body: String?,
@@ -310,7 +302,10 @@ private fun articleHtml(
     val note = article.note?.takeIf { it.isNotBlank() }
         ?.let { "<div class=\"note\"><b>Notiz</b><br>${TextUtils.htmlEncode(it)}</div>" }.orEmpty()
     val content = body?.takeIf { it.isNotBlank() }
-        ?: "<p class=\"meta\">Dieser Feed liefert keinen Text. Über das Menü lässt sich der Volltext laden.</p>"
+        ?: "<p class=\"meta\">Dieser Feed liefert keinen Text. Das Textsymbol oben lädt den Volltext.</p>"
+    // The headline links to the article; the WebView hands links to the browser.
+    val title = TextUtils.htmlEncode(article.title)
+    val headline = article.link?.let { "<a href=\"${TextUtils.htmlEncode(it)}\">$title</a>" } ?: title
     return """
         <!DOCTYPE html><html><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -318,6 +313,7 @@ private fun articleHtml(
           body { font-family: sans-serif; font-size: 17px; line-height: 1.55; color: ${text.css()};
                  margin: 0; padding: 8px 16px 48px; overflow-wrap: break-word; }
           h1 { font-size: 1.4em; line-height: 1.25; margin: 0 0 8px; }
+          h1 a { color: inherit; text-decoration: none; }
           h2, h3, h4 { line-height: 1.3; }
           .meta { color: ${muted.css()}; font-size: 0.85em; }
           .note { background: ${noteBackground.css()}; color: ${noteText.css()}; border-radius: 12px;
@@ -328,7 +324,7 @@ private fun articleHtml(
           pre { white-space: pre-wrap; } table { display: block; overflow-x: auto; }
           blockquote { margin: 16px 0; padding-left: 14px; border-left: 3px solid ${muted.css()}; }
         </style></head><body>
-        <h1>${TextUtils.htmlEncode(article.title)}</h1>
+        <h1>$headline</h1>
         <div class="meta">$meta</div>
         $note
         $content

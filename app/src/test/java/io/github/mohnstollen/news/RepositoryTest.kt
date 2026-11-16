@@ -9,6 +9,7 @@ import io.github.mohnstollen.news.data.FeedException
 import io.github.mohnstollen.news.data.FeedFetcher
 import io.github.mohnstollen.news.data.FullTextExtractor
 import io.github.mohnstollen.news.data.Repository
+import io.github.mohnstollen.news.data.SearchQuery
 import io.github.mohnstollen.news.data.SettingsStore
 import io.github.mohnstollen.news.data.SyncException
 import io.github.mohnstollen.news.data.SyncManager
@@ -223,6 +224,64 @@ class RepositoryTest {
         assertEquals(1, d.repo.refreshAll().newArticles)
         val third = d.repo.articleDao.observeList(null, false).first().first { it.title == "Dritter" }
         assertNotNull(d.repo.articleDao.byId(third.id)!!.fullText)
+    }
+
+    @Test
+    fun searchFindsWordsInTitleTextFullTextAndNotes() = runBlocking {
+        val d = device()
+        serve("/feed.xml", rss(Triple("1", "Ärger um Übergangsfristen", recent), Triple("2", "Wetterbericht", recent.minusSeconds(60))))
+        serve("/other.xml", rss(Triple("x", "Wetter am Wochenende", recent.minusSeconds(120)), title = "Anderer"))
+        val feed = d.repo.addFeed(url("/feed.xml"), null)
+        d.repo.addFeed(url("/other.xml"), null)
+        val ids = d.repo.articleDao.observeList(null, false).first().associate { it.title to it.id }
+
+        suspend fun search(text: String, feedId: Long? = null, starred: Boolean = false) =
+            d.repo.articleDao.observeSearch(SearchQuery.toMatch(text)!!, feedId, starred).first().map { it.title }
+
+        // Case and umlauts do not matter; words match from their beginning; all words must occur.
+        assertEquals(listOf("Ärger um Übergangsfristen"), search("ärger"))
+        assertEquals(listOf("Ärger um Übergangsfristen"), search("ÜBERGANG"))
+        assertEquals(listOf("Wetterbericht", "Wetter am Wochenende"), search("wetter"))
+        assertEquals(listOf("Wetter am Wochenende"), search("wetter wochen"))
+        assertEquals(emptyList<String>(), search("fristen"))
+        // The teaser text from the feed.
+        assertEquals(3, search("teaser").size)
+        // Limited to the feed or the starred articles on screen.
+        assertEquals(listOf("Wetterbericht"), search("wetter", feedId = feed.id))
+        d.repo.setStarred(ids.getValue("Wetter am Wochenende"), true)
+        assertEquals(listOf("Wetter am Wochenende"), search("wetter", starred = true))
+
+        // Notes and downloaded full text are indexed as they change; read articles are found too.
+        d.repo.setNote(ids.getValue("Wetterbericht"), "Für den Gartenverein")
+        d.repo.articleDao.setFullText(ids.getValue("Wetterbericht"), "<p>Ein Tiefdruckgebiet zieht heran.</p>")
+        d.repo.setRead(ids.values.toList(), true)
+        assertEquals(listOf("Wetterbericht"), search("gartenverein"))
+        assertEquals(listOf("Wetterbericht"), search("tiefdruck"))
+        d.repo.setNote(ids.getValue("Wetterbericht"), "")
+        assertEquals(emptyList<String>(), search("gartenverein"))
+        // Deleted feeds leave nothing behind in the index.
+        d.repo.deleteFeed(feed.id)
+        assertEquals(listOf("Wetter am Wochenende"), search("wetter"))
+    }
+
+    @Test
+    fun refreshReportsNewArticlesOfFeedsWithNotifications() = runBlocking {
+        val d = device()
+        serve("/feed.xml", rss(Triple("1", "Eins", recent)))
+        serve("/other.xml", rss(Triple("x", "X", recent), title = "Stumm"))
+        val loud = d.repo.addFeed(url("/feed.xml"), null)
+        val muted = d.repo.addFeed(url("/other.xml"), null)
+        assertTrue("on by default", d.repo.feedDao.byId(muted.id)!!.notify)
+        d.repo.updateFeed(muted.id, muted.title, muted.url, null, fetchFullText = false, notify = false)
+        assertFalse(d.repo.feedDao.byId(muted.id)!!.notify)
+
+        serve("/feed.xml", rss(Triple("2", "Zwei", Instant.now()), Triple("1", "Eins", recent)))
+        serve("/other.xml", rss(Triple("y", "Y", Instant.now()), Triple("x", "X", recent), title = "Stumm"))
+        val result = d.repo.refreshAll()
+        assertEquals(2, result.newArticles)
+        assertEquals(listOf("Zwei"), d.repo.articleDao.listItems(result.notifyIds).map { it.title })
+        assertEquals(loud.id, d.repo.articleDao.listItems(result.notifyIds).single().feedId)
+        assertTrue(d.repo.refreshAll().notifyIds.isEmpty())
     }
 
     @Test

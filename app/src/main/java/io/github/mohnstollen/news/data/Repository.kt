@@ -16,7 +16,13 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.InputStream
 
-data class RefreshResult(val newArticles: Int, val failedFeeds: Int, val skipped: Boolean = false)
+data class RefreshResult(
+    val newArticles: Int,
+    val failedFeeds: Int,
+    val skipped: Boolean = false,
+    /** New articles of feeds that have notifications switched on. */
+    val notifyIds: List<Long> = emptyList(),
+)
 
 class Repository(
     private val db: AppDatabase,
@@ -46,24 +52,28 @@ class Repository(
             _refreshing.value = true
             val feeds = if (feedId == null) feedDao.all() else listOfNotNull(feedDao.byId(feedId))
             val parallel = Semaphore(4)
-            val counts = coroutineScope {
-                feeds.map { feed -> async { parallel.withPermit { refreshFeed(feed) } } }.awaitAll()
+            val results = coroutineScope {
+                feeds.map { feed -> async { parallel.withPermit { feed to refreshFeed(feed) } } }.awaitAll()
             }
-            RefreshResult(newArticles = counts.filter { it > 0 }.sum(), failedFeeds = counts.count { it < 0 })
+            RefreshResult(
+                newArticles = results.sumOf { it.second?.size ?: 0 },
+                failedFeeds = results.count { it.second == null },
+                notifyIds = results.filter { it.first.notify }.flatMap { it.second.orEmpty() },
+            )
         } finally {
             _refreshing.value = false
             refreshMutex.unlock()
         }
     }
 
-    /** Returns the number of new articles, or -1 if the feed could not be loaded. */
-    private suspend fun refreshFeed(feed: Feed): Int {
+    /** Returns the ids of the new articles, or null if the feed could not be loaded. */
+    private suspend fun refreshFeed(feed: Feed): List<Long>? {
         val now = System.currentTimeMillis()
         return try {
             when (val result = fetcher.fetch(feed.url, feed.etag, feed.lastModified)) {
                 FeedFetcher.Result.NotModified -> {
                     feedDao.fetchSucceeded(feed.id, now, feed.etag, feed.lastModified, null)
-                    0
+                    emptyList()
                 }
                 is FeedFetcher.Result.Fetched -> {
                     val newIds = storeItems(feed, result.feed, now)
@@ -71,14 +81,14 @@ class Repository(
                     if (feed.fetchFullText) {
                         newIds.take(MAX_FULL_TEXT_PER_REFRESH).forEach { runCatchingCancellable { loadFullText(it) } }
                     }
-                    newIds.size
+                    newIds
                 }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             feedDao.fetchFailed(feed.id, now, e.message ?: e.javaClass.simpleName)
-            -1
+            null
         }
     }
 
@@ -159,7 +169,14 @@ class Repository(
     }
 
     /** Throws [FeedException] if a changed address is not a feed or is already subscribed. */
-    suspend fun updateFeed(id: Long, title: String, url: String, category: String?, fetchFullText: Boolean) =
+    suspend fun updateFeed(
+        id: Long,
+        title: String,
+        url: String,
+        category: String?,
+        fetchFullText: Boolean,
+        notify: Boolean? = null,
+    ) =
         withContext(Dispatchers.IO) {
             val feed = feedDao.byId(id) ?: return@withContext
             if (title.isBlank()) throw FeedException("Bitte einen Titel eingeben")
@@ -177,6 +194,7 @@ class Repository(
                     feedDao.clearCacheHeaders(id)
                 }
                 feedDao.updateSubscription(id, title.trim(), newUrl, category?.trim()?.ifBlank { null }, fetchFullText, now)
+                if (notify != null) feedDao.setNotify(id, notify)
             }
         }
 
