@@ -24,6 +24,10 @@ class RefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorke
             runCatching { container.sync.sync() }
         }
         val result = container.repository.refreshAll()
+        if (prefs.notifyNewArticles && result.notifyIds.isNotEmpty()) {
+            val articles = container.repository.articleDao.listItems(result.notifyIds.take(500))
+            Notifier.showNewArticles(applicationContext, articles)
+        }
         return if (result.failedFeeds > 0 && result.newArticles == 0 && runAttemptCount < 2) Result.retry() else Result.success()
     }
 

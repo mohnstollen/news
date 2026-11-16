@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -187,7 +189,9 @@ fun FeedsScreen(onBack: () -> Unit) {
     feeds.firstOrNull { it.feed.id == editId }?.let { entry ->
         EditFeedDialog(
             feed = entry.feed,
-            onSave = { title, url, category, fullText -> repo.updateFeed(entry.feed.id, title, url, category, fullText) },
+            onSave = { title, url, category, fullText, notify ->
+                repo.updateFeed(entry.feed.id, title, url, category, fullText, notify)
+            },
             onSaved = { editId = null },
             onDismiss = { editId = null },
         )
@@ -231,6 +235,7 @@ private fun FeedRow(entry: FeedWithUnread, onEdit: () -> Unit, onDelete: () -> U
                 feed.category?.let { add(it) }
                 add(if (entry.unread == 1) "1 ungelesen" else "${entry.unread} ungelesen")
                 if (feed.fetchFullText) add("Volltext")
+                if (!feed.notify) add("stumm")
                 add(
                     if (feed.lastFetched == 0L) "noch nicht geladen"
                     else "geladen " + DateUtils.getRelativeTimeSpanString(
@@ -324,7 +329,7 @@ private fun AddFeedDialog(
 @Composable
 private fun EditFeedDialog(
     feed: Feed,
-    onSave: suspend (title: String, url: String, category: String?, fetchFullText: Boolean) -> Unit,
+    onSave: suspend (title: String, url: String, category: String?, fetchFullText: Boolean, notify: Boolean) -> Unit,
     onSaved: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -332,6 +337,7 @@ private fun EditFeedDialog(
     var url by rememberSaveable { mutableStateOf(feed.url) }
     var category by rememberSaveable { mutableStateOf(feed.category.orEmpty()) }
     var fullText by rememberSaveable { mutableStateOf(feed.fetchFullText) }
+    var notify by rememberSaveable { mutableStateOf(feed.notify) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -340,7 +346,10 @@ private fun EditFeedDialog(
         onDismissRequest = onDismiss,
         title = { Text("Feed bearbeiten") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it; error = null },
@@ -378,6 +387,17 @@ private fun EditFeedDialog(
                     }
                     Switch(checked = fullText, onCheckedChange = { fullText = it }, enabled = !busy)
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Bei neuen Artikeln benachrichtigen")
+                        Text(
+                            "Wirkt nur, wenn Benachrichtigungen in den Einstellungen eingeschaltet sind.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = notify, onCheckedChange = { notify = it }, enabled = !busy)
+                }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             }
@@ -389,7 +409,7 @@ private fun EditFeedDialog(
                     busy = true
                     scope.launch {
                         try {
-                            onSave(title, url, category, fullText)
+                            onSave(title, url, category, fullText, notify)
                             onSaved()
                         } catch (e: CancellationException) {
                             throw e

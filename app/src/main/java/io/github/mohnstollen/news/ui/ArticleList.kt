@@ -21,11 +21,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.automirrored.filled.List
@@ -48,6 +51,8 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -65,8 +70,13 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -75,14 +85,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import io.github.mohnstollen.news.data.ArticleListItem
 import io.github.mohnstollen.news.data.FeedWithUnread
+import io.github.mohnstollen.news.data.SearchQuery
 import io.github.mohnstollen.news.ui.MainViewModel.ListScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
@@ -123,11 +136,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val starredTotal = repo.articleDao.observeStarredCount()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
-    /** null while loading. */
-    @OptIn(ExperimentalCoroutinesApi::class)
+    /** What is typed into the search field; null while the search is closed. */
+    private val _search = MutableStateFlow<String?>(null)
+    val search: StateFlow<String?> = _search
+
+    /** null while loading. While searching, the hits within the current scope, read ones included. */
+    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     val articles: StateFlow<List<ArticleListItem>?> = _scope
-        .flatMapLatest { scope ->
+        .combine(
+            _search.map { it?.let(SearchQuery::toMatch) }.distinctUntilChanged()
+                // Wait for a pause in typing; closing the search takes effect at once.
+                .debounce { if (it == null) 0L else 250L },
+        ) { scope, match -> scope to match }
+        .flatMapLatest { (scope, match) ->
             val filter = prefs.map { it.unreadOnly to it.newestFirst }.distinctUntilChanged()
+            val feedId = (scope as? ListScope.Single)?.feedId
+            if (match != null) {
+                return@flatMapLatest combine(
+                    repo.articleDao.observeSearch(match, feedId, scope is ListScope.Starred),
+                    filter,
+                ) { hits, (_, newestFirst) -> if (newestFirst) hits else hits.asReversed() }
+            }
             combine(
                 repo.articleDao.observeList((scope as? ListScope.Single)?.feedId, scope is ListScope.Starred),
                 filter,
@@ -140,6 +169,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    fun openSearch() {
+        if (_search.value == null) _search.value = ""
+    }
+
+    fun closeSearch() {
+        _search.value = null
+    }
+
+    fun setSearch(text: String) {
+        _search.value = text
+    }
 
     fun select(scope: ListScope) {
         keepVisible.value = emptySet()
@@ -213,6 +254,9 @@ fun ArticleListScreen(
     val refreshing by vm.refreshing.collectAsStateWithLifecycle()
     val unreadTotal by vm.unreadTotal.collectAsStateWithLifecycle()
     val starredTotal by vm.starredTotal.collectAsStateWithLifecycle()
+    val search by vm.search.collectAsStateWithLifecycle()
+    val searching = search != null
+    val hasQuery = !search.isNullOrBlank()
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val coroutineScope = rememberCoroutineScope()
@@ -221,6 +265,7 @@ fun ArticleListScreen(
     var confirmMarkAll by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
+    BackHandler(enabled = searching) { vm.closeSearch() }
     BackHandler(enabled = drawerState.isOpen) { coroutineScope.launch { drawerState.close() } }
     // The selected feed was deleted in the meantime.
     LaunchedEffect(scope, feeds) {
@@ -262,7 +307,14 @@ fun ArticleListScreen(
             modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
             snackbarHost = { SnackbarHost(snackbar) },
             topBar = {
-                TopAppBar(
+                if (searching) {
+                    SearchBar(
+                        text = search.orEmpty(),
+                        placeholder = if (scope == ListScope.All) "Alle Artikel durchsuchen" else "In „$title“ suchen",
+                        onChange = vm::setSearch,
+                        onClose = vm::closeSearch,
+                    )
+                } else TopAppBar(
                     title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     scrollBehavior = scrollBehavior,
                     navigationIcon = {
@@ -271,6 +323,9 @@ fun ArticleListScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = vm::openSearch) {
+                            Icon(Icons.Default.Search, contentDescription = "Suchen")
+                        }
                         IconButton(onClick = { confirmMarkAll = true }) {
                             Icon(AppIcons.DoneAll, contentDescription = "Alle als gelesen markieren")
                         }
@@ -309,17 +364,19 @@ fun ArticleListScreen(
                     items == null -> Unit
                     items.isEmpty() -> EmptyState(
                         text = when {
+                            hasQuery -> "Keine Treffer für „${search.orEmpty().trim()}“."
                             feeds.isEmpty() -> "Noch keine Feeds abonniert."
                             scope is ListScope.Starred -> "Noch keine Artikel gemerkt.\nTippe bei einem Artikel auf den Stern."
                             prefs.unreadOnly -> "Keine ungelesenen Artikel."
                             else -> "Keine Artikel. Zum Aktualisieren nach unten ziehen."
                         },
-                        action = if (feeds.isEmpty()) "Feed hinzufügen" to onOpenFeeds else null,
+                        action = if (feeds.isEmpty() && !hasQuery) "Feed hinzufügen" to onOpenFeeds else null,
                     )
                     else -> ArticleList(
                         items = items,
-                        listKey = scope,
-                        markReadOnScroll = prefs.markReadOnScroll,
+                        // Search results keep their own scroll position, and browsing them marks nothing.
+                        listKey = if (hasQuery) "search" to scope else scope,
+                        markReadOnScroll = prefs.markReadOnScroll && !hasQuery,
                         onScrolledPast = vm::markRead,
                         onOpen = { onOpenArticle(it.id) },
                         onToggleRead = vm::toggleRead,
@@ -341,6 +398,44 @@ fun ArticleListScreen(
             dismissButton = { TextButton(onClick = { confirmMarkAll = false }) { Text("Abbrechen") } },
         )
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SearchBar(text: String, placeholder: String, onChange: (String) -> Unit, onClose: () -> Unit) {
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    TopAppBar(
+        navigationIcon = {
+            IconButton(onClick = onClose) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Suche schließen")
+            }
+        },
+        title = {
+            TextField(
+                value = text,
+                onValueChange = onChange,
+                placeholder = { Text(placeholder, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                ),
+                modifier = Modifier.fillMaxWidth().focusRequester(focus),
+            )
+        },
+        actions = {
+            if (text.isNotEmpty()) {
+                IconButton(onClick = { onChange("") }) {
+                    Icon(Icons.Default.Close, contentDescription = "Eingabe löschen")
+                }
+            }
+        },
+    )
 }
 
 @Composable

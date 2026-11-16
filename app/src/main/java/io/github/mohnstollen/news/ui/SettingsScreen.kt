@@ -1,6 +1,12 @@
 package io.github.mohnstollen.news.ui
 
+import android.Manifest
+import android.os.Build
 import android.text.format.DateUtils
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import io.github.mohnstollen.news.work.Notifier
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -104,6 +110,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                 onChange = { value -> updateSchedule { it.copy(wifiOnly = value) } },
             )
 
+            NotificationRow(
+                enabled = prefs.notifyNewArticles,
+                autoUpdate = prefs.autoUpdate,
+                onChange = { value -> settings.update { it.copy(notifyNewArticles = value) } },
+            )
+
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SectionTitle("Lesen")
             SwitchRow(
@@ -147,6 +159,43 @@ fun SettingsScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(32.dp))
         }
     }
+}
+
+/** The switch asks for the notification permission where Android requires one (13 and newer). */
+@Composable
+private fun NotificationRow(enabled: Boolean, autoUpdate: Boolean, onChange: (Boolean) -> Unit) {
+    val context = LocalContext.current
+    var denied by remember { mutableStateOf(false) }
+    // Re-read when the screen comes back, e.g. from the system settings.
+    var allowed by remember { mutableStateOf(Notifier.canNotify(context)) }
+    LifecycleResumeEffect(Unit) {
+        allowed = Notifier.canNotify(context)
+        onPauseOrDispose {}
+    }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        allowed = Notifier.canNotify(context)
+        denied = !granted
+        onChange(granted)
+    }
+    SwitchRow(
+        title = "Bei neuen Artikeln benachrichtigen",
+        subtitle = when {
+            !autoUpdate -> "Benachrichtigt wird nur nach automatischen Updates im Hintergrund."
+            enabled && !allowed || denied ->
+                "Android blockiert die Benachrichtigungen dieser App. Erlaube sie in den System-Einstellungen."
+            else -> "Nach einem Hintergrund-Update. Einzelne Feeds lassen sich in der Feed-Verwaltung ausnehmen."
+        },
+        checked = enabled,
+        enabled = autoUpdate,
+        onChange = { value ->
+            denied = false
+            if (value && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !allowed) {
+                permission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                onChange(value)
+            }
+        },
+    )
 }
 
 @Composable

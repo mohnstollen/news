@@ -1,16 +1,21 @@
 package io.github.mohnstollen.news.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.ForeignKey
+import androidx.room.Fts4
+import androidx.room.FtsOptions
 import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "feeds", indices = [Index(value = ["url"], unique = true)])
@@ -28,6 +33,8 @@ data class Feed(
     val lastModified: String? = null,
     /** Last time the user changed this subscription; used to resolve sync conflicts. */
     val updatedAt: Long = 0,
+    /** Include this feed's new articles in the "new articles" notification. */
+    @ColumnInfo(defaultValue = "1") val notify: Boolean = true,
 )
 
 @Entity(
@@ -62,6 +69,17 @@ data class Article(
     val note: String? = null,
     /** Last time star or note changed; 0 if never. Used for sync. */
     val stateUpdatedAt: Long = 0,
+)
+
+/** Full-text index over the searchable columns of [Article]; Room keeps it in sync. */
+@Fts4(contentEntity = Article::class, tokenizer = FtsOptions.TOKENIZER_UNICODE61)
+@Entity(tableName = "articles_fts")
+data class ArticleFts(
+    val title: String,
+    val summary: String,
+    val content: String?,
+    val fullText: String?,
+    val note: String?,
 )
 
 /** Remembers unsubscribed feeds so a sync does not bring them back. */
@@ -132,6 +150,9 @@ interface FeedDao {
         updatedAt: Long,
     )
 
+    @Query("UPDATE feeds SET notify = :notify WHERE id = :id")
+    suspend fun setNotify(id: Long, notify: Boolean)
+
     @Query("UPDATE feeds SET etag = NULL, lastModified = NULL WHERE id = :id")
     suspend fun clearCacheHeaders(id: Long)
 
@@ -167,6 +188,25 @@ interface ArticleDao {
             "ORDER BY a.pubDate DESC, a.id DESC LIMIT 5000",
     )
     fun observeList(feedId: Long?, starredOnly: Boolean): Flow<List<ArticleListItem>>
+
+    /** [match] is an FTS expression, see [SearchQuery]. Read articles are included. */
+    @Query(
+        "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote " +
+            "FROM articles a JOIN feeds f ON f.id = a.feedId JOIN articles_fts ON articles_fts.docid = a.id " +
+            "WHERE articles_fts MATCH :match " +
+            "AND (:feedId IS NULL OR a.feedId = :feedId) AND (:starredOnly = 0 OR a.starred = 1) " +
+            "ORDER BY a.pubDate DESC, a.id DESC LIMIT 1000",
+    )
+    fun observeSearch(match: String, feedId: Long?, starredOnly: Boolean): Flow<List<ArticleListItem>>
+
+    @Query(
+        "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote " +
+            "FROM articles a JOIN feeds f ON f.id = a.feedId WHERE a.id IN (:ids) " +
+            "ORDER BY a.pubDate DESC, a.id DESC",
+    )
+    suspend fun listItems(ids: List<Long>): List<ArticleListItem>
 
     @Query("SELECT COUNT(*) FROM articles WHERE read = 0")
     fun observeUnreadCount(): Flow<Int>
@@ -231,8 +271,37 @@ interface ArticleDao {
     suspend fun syncRows(): List<ArticleSyncRow>
 }
 
-@Database(entities = [Feed::class, Article::class, DeletedFeed::class], version = 1, exportSchema = true)
+@Database(
+    entities = [Feed::class, Article::class, DeletedFeed::class, ArticleFts::class],
+    version = 2,
+    exportSchema = true,
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun feedDao(): FeedDao
     abstract fun articleDao(): ArticleDao
+
+    companion object {
+        /** Adds the per-feed notification switch and the search index. */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE feeds ADD COLUMN notify INTEGER NOT NULL DEFAULT 1")
+                db.execSQL(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS `articles_fts` USING FTS4(`title` TEXT NOT NULL, " +
+                        "`summary` TEXT NOT NULL, `content` TEXT, `fullText` TEXT, `note` TEXT, " +
+                        "tokenize=unicode61, content=`articles`)",
+                )
+                db.execSQL("INSERT INTO articles_fts(articles_fts) VALUES('rebuild')")
+            }
+        }
+    }
+}
+
+/** Turns what the user typed into an FTS expression: every word must occur, as a word prefix. */
+object SearchQuery {
+    private val separators = Regex("[^\\p{L}\\p{N}]+")
+
+    /** Returns null if the input contains nothing to search for. */
+    fun toMatch(input: String): String? =
+        input.lowercase().split(separators).filter { it.isNotEmpty() }
+            .joinToString(" ") { "$it*" }.ifEmpty { null }
 }

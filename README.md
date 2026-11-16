@@ -15,6 +15,8 @@ RSS-/Atom-Reader für Android (ab Android 8.0), geschrieben in Kotlin mit Jetpac
   lässt sich pro Artikel laden oder pro Feed automatisch bei jedem Update
 - **Aktualisierung** im Hintergrund in einstellbarem Intervall (Standard 60 Minuten, auf Wunsch
   nur im WLAN) oder nur manuell
+- **Suche** über Titel, Text, Volltext und Notizen, in allen Artikeln oder im gewählten Feed
+- **Benachrichtigung** bei neuen Artikeln nach einem Hintergrund-Update (abschaltbar, auch pro Feed)
 - **OPML** Import und Export
 - **Nextcloud** (WebDAV): gleicht Feeds, gemerkte Artikel und Notizen zwischen Geräten ab
 
@@ -48,11 +50,12 @@ Keystore abgelegt.
 
 | Pfad | Inhalt |
 | --- | --- |
-| `data/Database.kt` | Room-Datenbank: Feeds, Artikel, Löschmarker |
+| `data/Database.kt` | Room-Datenbank: Feeds, Artikel, Löschmarker, Suchindex |
 | `data/FeedParser.kt` | RSS 2.0, RSS 1.0 (RDF) und Atom, Datumsformate |
 | `data/Network.kt` | Abruf, Feed-Suche auf Webseiten, Volltext-Extraktion |
 | `data/Opml.kt` | OPML lesen und schreiben |
 | `data/Sync.kt` | WebDAV-Client und Abgleich |
 | `data/Repository.kt` | Aktualisieren, Abonnements, Artikelstatus |
 | `work/RefreshWorker.kt` | Hintergrund-Aktualisierung mit WorkManager |
+| `work/Notifier.kt` | Benachrichtigung über neue Artikel |
 | `ui/` | Oberfläche: Artikelliste, Leseansicht, Feeds, Einstellungen |

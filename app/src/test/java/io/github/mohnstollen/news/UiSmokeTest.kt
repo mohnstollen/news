@@ -111,6 +111,32 @@ class ScrollMarksReadTest : UiTestBase() {
     }
 }
 
+class SearchUiTest : UiTestBase() {
+    @Test(timeout = 120000)
+    fun searchFiltersTheListAndClosingRestoresIt() {
+        waitFor("Artikel Nummer 1")
+        compose.onNodeWithContentDescription("Suchen").performClick()
+        compose.onNodeWithText("Alle Artikel durchsuchen").performTextInput("nummer 17")
+        waitFor("Artikel Nummer 17")
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Artikel Nummer 1").fetchSemanticsNodes().isEmpty() }
+
+        // Scrolling through hits marks nothing; opening one works as usual.
+        assertEquals(30, unreadCount())
+        compose.onNodeWithText("Artikel Nummer 17").performClick()
+        compose.waitUntil(5_000) { article(17).read }
+        compose.onNodeWithContentDescription("Zurück").performClick()
+        waitFor("Artikel Nummer 17")
+
+        compose.onNodeWithContentDescription("Eingabe löschen").performClick()
+        compose.onNodeWithText("Alle Artikel durchsuchen").performTextInput("gibtesnicht")
+        waitFor("Keine Treffer für „gibtesnicht“.")
+
+        compose.onNodeWithContentDescription("Suche schließen").performClick()
+        waitFor("Artikel Nummer 1")
+        compose.onNodeWithContentDescription("Suchen").assertIsDisplayed()
+    }
+}
+
 class UiSmokeTest : UiTestBase() {
     @Test(timeout = 120000)
     fun listStarReaderNoteAndScreens() {

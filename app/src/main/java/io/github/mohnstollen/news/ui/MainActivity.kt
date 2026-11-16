@@ -17,6 +17,8 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -31,14 +33,43 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import io.github.mohnstollen.news.AppContainer
 import io.github.mohnstollen.news.NewsApp
+import io.github.mohnstollen.news.work.Notifier
 
 class MainActivity : ComponentActivity() {
+    /** Article to open, as requested by a tap on the notification. */
+    private val requestedArticle = mutableStateOf<Long?>(null)
+
+    private fun readIntent(intent: Intent?) {
+        val id = intent?.getLongExtra(Notifier.EXTRA_ARTICLE_ID, -1L) ?: -1L
+        if (id > 0) {
+            requestedArticle.value = id
+            // Do not open it again when the activity is recreated.
+            intent?.removeExtra(Notifier.EXTRA_ARTICLE_ID)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        readIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        Notifier.cancel(this)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) readIntent(intent)
         setContent {
             NewsTheme {
                 val nav = rememberNavController()
+                LaunchedEffect(requestedArticle.value) {
+                    val id = requestedArticle.value ?: return@LaunchedEffect
+                    requestedArticle.value = null
+                    nav.navigate("reader/$id") { launchSingleTop = true }
+                }
                 // Shared by all destinations, so list scope and filters survive navigation.
                 val mainViewModel: MainViewModel = viewModel()
                 NavHost(nav, startDestination = "list") {
