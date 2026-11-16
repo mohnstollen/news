@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.News" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
