@@ -117,6 +117,18 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            SectionTitle("Widget")
+            NumberField(
+                label = "Widget-Intervall in Minuten",
+                value = prefs.widgetIntervalMinutes,
+                hint = "So oft lädt ein Widget auf dem Startbildschirm die Feeds und zeigt die neuesten " +
+                    "ungelesenen Artikel. Mindestens $MIN_INTERVAL_MINUTES Minuten; gilt auch, wenn die automatische " +
+                    "Aktualisierung aus ist. Hinzufügen: Startbildschirm lange drücken, „Widgets“, „News“.",
+                isValid = { it >= MIN_INTERVAL_MINUTES },
+                onValid = { value -> updateSchedule { it.copy(widgetIntervalMinutes = value) } },
+            )
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SectionTitle("Lesen")
             SwitchRow(
                 title = "Beim Scrollen als gelesen markieren",

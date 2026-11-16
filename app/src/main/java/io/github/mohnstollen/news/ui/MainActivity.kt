@@ -33,7 +33,9 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import io.github.mohnstollen.news.AppContainer
 import io.github.mohnstollen.news.NewsApp
+import io.github.mohnstollen.news.widget.NewsWidget
 import io.github.mohnstollen.news.work.Notifier
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     /** Article to open, as requested by a tap on the notification. */
@@ -51,6 +53,13 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         readIntent(intent)
+    }
+
+    /** Reading changes what the widget should list. */
+    override fun onStop() {
+        super.onStop()
+        val app = applicationContext
+        container.repository.scope.launch { NewsWidget.updateAll(app) }
     }
 
     override fun onResume() {

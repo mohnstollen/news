@@ -167,6 +167,10 @@ interface FeedDao {
     @Query("UPDATE feeds SET lastFetched = :now, lastError = :error WHERE id = :id")
     suspend fun fetchFailed(id: Long, now: Long, error: String)
 
+    /** When the feeds were last loaded successfully or not; null without feeds. */
+    @Query("SELECT MAX(lastFetched) FROM feeds")
+    suspend fun lastFetched(): Long?
+
     @Query("DELETE FROM feeds WHERE id = :id")
     suspend fun delete(id: Long)
 
@@ -209,6 +213,14 @@ interface ArticleDao {
             "ORDER BY a.pubDate DESC, a.id DESC",
     )
     suspend fun listItems(ids: List<Long>): List<ArticleListItem>
+
+    @Query(
+        "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category " +
+            "FROM articles a JOIN feeds f ON f.id = a.feedId WHERE a.read = 0 " +
+            "ORDER BY a.pubDate DESC, a.id DESC LIMIT :limit",
+    )
+    suspend fun newestUnread(limit: Int): List<ArticleListItem>
 
     @Query("SELECT COUNT(*) FROM articles WHERE read = 0")
     fun observeUnreadCount(): Flow<Int>

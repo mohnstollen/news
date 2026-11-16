@@ -26,6 +26,8 @@ data class Prefs(
     val retentionDays: Int = 90,
     /** Announce articles found by a background update. */
     val notifyNewArticles: Boolean = false,
+    /** How often a placed home screen widget loads the feeds and redraws. */
+    val widgetIntervalMinutes: Int = DEFAULT_INTERVAL_MINUTES,
     val ncServer: String = "",
     val ncUser: String = "",
     val ncFolder: String = "News",
@@ -56,6 +58,7 @@ class SettingsStore(context: Context) {
             newestFirst = sp.getBoolean("newestFirst", d.newestFirst),
             retentionDays = sp.getInt("retentionDays", d.retentionDays),
             notifyNewArticles = sp.getBoolean("notifyNewArticles", d.notifyNewArticles),
+            widgetIntervalMinutes = sp.getInt("widgetIntervalMinutes", d.widgetIntervalMinutes),
             ncServer = sp.getString("ncServer", d.ncServer)!!,
             ncUser = sp.getString("ncUser", d.ncUser)!!,
             ncFolder = sp.getString("ncFolder", d.ncFolder)!!,
@@ -77,6 +80,7 @@ class SettingsStore(context: Context) {
             .putBoolean("newestFirst", p.newestFirst)
             .putInt("retentionDays", p.retentionDays)
             .putBoolean("notifyNewArticles", p.notifyNewArticles)
+            .putInt("widgetIntervalMinutes", p.widgetIntervalMinutes)
             .putString("ncServer", p.ncServer)
             .putString("ncUser", p.ncUser)
             .putString("ncFolder", p.ncFolder)
