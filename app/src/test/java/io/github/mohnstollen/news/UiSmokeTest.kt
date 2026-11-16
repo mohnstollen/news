@@ -2,6 +2,9 @@ package io.github.mohnstollen.news
 
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithText
@@ -111,6 +114,84 @@ class ScrollMarksReadTest : UiTestBase() {
     }
 }
 
+class QuickFilterUiTest : UiTestBase() {
+    private fun gone(text: String) = compose.waitUntil(5_000) {
+        compose.onAllNodesWithText(text).fetchSemanticsNodes().isEmpty()
+    }
+
+    /** The folder name also appears as a heading in the drawer; this finds the chip or menu entry. */
+    private fun clickable(text: String) = compose.onNode(hasText(text) and hasClickAction())
+
+    @Test(timeout = 120000)
+    fun chipsNarrowTheListAndFoldersAreOfferedWhenAddingAFeed() {
+        waitFor("Artikel Nummer 1")
+        // Without folders there is nothing to choose from.
+        assertTrue(compose.onAllNodesWithText("Ordner").fetchSemanticsNodes().isEmpty())
+
+        val now = System.currentTimeMillis()
+        runBlocking {
+            val feedId = repo.feedDao.insert(
+                Feed(url = "https://example.org/technik", title = "Technikfeed", category = "Technik", updatedAt = now),
+            )
+            fun article(guid: String, title: String, age: Long, read: Boolean) = Article(
+                feedId = feedId, guid = guid, title = title, pubDate = now - age, fetchedAt = now, read = read,
+            )
+            repo.articleDao.insertAll(
+                listOf(
+                    article("t1", "Technik frisch", 30 * 60_000L, read = false),
+                    article("t2", "Technik gelesen", 40 * 60_000L, read = true),
+                    article("t3", "Technik von gestern", 26 * 3_600_000L, read = false),
+                ),
+            )
+        }
+
+        // Folder.
+        waitFor("Ordner")
+        compose.onNodeWithText("Ordner").performClick()
+        clickable("Technik").performClick()
+        gone("Artikel Nummer 1")
+        compose.onNodeWithText("Technik frisch").assertIsDisplayed()
+        compose.onNodeWithText("Technik gelesen").assertIsDisplayed()
+        compose.onNodeWithText("Technik von gestern").assertIsDisplayed()
+
+        // Unread only, within that folder.
+        compose.onNodeWithText("Ungelesen").performClick()
+        gone("Technik gelesen")
+        compose.onNodeWithText("Technik von gestern").assertIsDisplayed()
+
+        // Only the last three hours.
+        compose.onNodeWithText("Neu (3 Std.)").performClick()
+        gone("Technik von gestern")
+        compose.onNodeWithText("Technik frisch").assertIsDisplayed()
+
+        // "Mark all read" is limited to what the filters show.
+        compose.onNodeWithContentDescription("Alle als gelesen markieren").performClick()
+        compose.onNodeWithText("Markieren").performClick()
+        compose.waitUntil(5_000) { unreadCount() == 31 }
+        waitFor("Keine Artikel für diese Filter.")
+
+        // Back to everything.
+        compose.onNodeWithText("Neu (3 Std.)").performClick()
+        compose.onNodeWithText("Ungelesen").performClick()
+        clickable("Technik").performClick()
+        compose.onNodeWithText("Alle Ordner").performClick()
+        waitFor("Artikel Nummer 1")
+        assertEquals(31, unreadCount())
+
+        // The folder is offered when adding a feed.
+        compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
+        compose.onNodeWithText("Feeds verwalten").performClick()
+        waitFor("https://example.org/technik")
+        compose.onNodeWithText("Feed hinzufügen", useUnmergedTree = true).performClick()
+        waitFor("Auswählen oder neuen Namen eingeben")
+        compose.onNodeWithText("Ordner (optional)").performClick()
+        waitFor("Kein Ordner")
+        clickable("Technik").performClick()
+        gone("Kein Ordner")
+        compose.onNode(hasText("Technik") and hasSetTextAction()).assertIsDisplayed()
+    }
+}
+
 class SearchUiTest : UiTestBase() {
     @Test(timeout = 120000)
     fun searchFiltersTheListAndClosingRestoresIt() {
@@ -160,9 +241,8 @@ class UiSmokeTest : UiTestBase() {
         compose.onNodeWithText("Speichern").performClick()
         compose.waitUntil(5_000) { article(3).hasNote }
         compose.onNodeWithContentDescription("Teilen").assertIsDisplayed()
-        compose.onNodeWithContentDescription("Mehr").performClick()
-        compose.onNodeWithText("Volltext laden").assertIsDisplayed()
-        compose.onNodeWithText("Als ungelesen markieren").performClick()
+        compose.onNodeWithContentDescription("Volltext laden").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Als ungelesen markieren").performClick()
         compose.waitUntil(5_000) { !article(3).read }
         waitFor("Alle Artikel")
 

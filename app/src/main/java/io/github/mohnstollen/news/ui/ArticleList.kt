@@ -5,6 +5,7 @@ import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
@@ -38,6 +40,7 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -136,6 +139,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val starredTotal = repo.articleDao.observeStarredCount()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
+    /** Quick filter: only articles published within [RECENT_WINDOW_MS]. */
+    private val _recentOnly = MutableStateFlow(false)
+    val recentOnly: StateFlow<Boolean> = _recentOnly
+
+    /** Quick filter of the "all articles" list: only this folder. */
+    private val _folder = MutableStateFlow<String?>(null)
+    val folder: StateFlow<String?> = _folder
+
+    fun setRecentOnly(value: Boolean) {
+        keepVisible.value = emptySet()
+        _recentOnly.value = value
+    }
+
+    fun setFolder(value: String?) {
+        keepVisible.value = emptySet()
+        _folder.value = value
+    }
+
     /** What is typed into the search field; null while the search is closed. */
     private val _search = MutableStateFlow<String?>(null)
     val search: StateFlow<String?> = _search
@@ -161,9 +182,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 repo.articleDao.observeList((scope as? ListScope.Single)?.feedId, scope is ListScope.Starred),
                 filter,
                 keepVisible,
-            ) { all, (unreadOnly, newestFirst), keep ->
-                val filtered =
-                    if (unreadOnly && scope !is ListScope.Starred) all.filter { !it.read || it.id in keep } else all
+                _recentOnly,
+                _folder,
+            ) { all, (unreadOnly, newestFirst), keep, recentOnly, folder ->
+                // The quick filters belong to the article lists; the starred list shows everything.
+                val filterable = scope !is ListScope.Starred
+                val since = if (recentOnly && filterable) System.currentTimeMillis() - RECENT_WINDOW_MS else null
+                val inFolder = folder.takeIf { scope is ListScope.All }
+                val filtered = all.filter { item ->
+                    (!unreadOnly || !filterable || !item.read || item.id in keep) &&
+                        (since == null || item.pubDate >= since) &&
+                        (inFolder == null || item.category == inFolder)
+                }
                 if (newestFirst) filtered else filtered.asReversed()
             }
         }
@@ -210,12 +240,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { repo.setStarred(item.id, !item.starred) }
     }
 
+    /** With a "new" or folder filter on, only what the list shows is marked. */
+    fun narrowed(): Boolean {
+        val scope = _scope.value
+        return (_recentOnly.value && scope !is ListScope.Starred) || (_folder.value != null && scope is ListScope.All)
+    }
+
     fun markAllRead() {
         val scope = _scope.value
+        val shown = if (narrowed()) articles.value.orEmpty().filter { !it.read }.map { it.id } else null
         keepVisible.value = emptySet()
         viewModelScope.launch {
-            repo.articleDao.markAllRead((scope as? ListScope.Single)?.feedId, scope is ListScope.Starred)
+            if (shown != null) repo.setRead(shown, true)
+            else repo.articleDao.markAllRead((scope as? ListScope.Single)?.feedId, scope is ListScope.Starred)
         }
+    }
+
+    companion object {
+        const val RECENT_WINDOW_MS = 3 * 60 * 60 * 1000L
     }
 
     fun refresh() {
@@ -256,6 +298,16 @@ fun ArticleListScreen(
     val starredTotal by vm.starredTotal.collectAsStateWithLifecycle()
     val search by vm.search.collectAsStateWithLifecycle()
     val searching = search != null
+    val recentOnly by vm.recentOnly.collectAsStateWithLifecycle()
+    val folder by vm.folder.collectAsStateWithLifecycle()
+    val folders = remember(feeds) {
+        feeds.mapNotNull { it.feed.category }.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
+    }
+    // The chosen folder is gone, e.g. its last feed was deleted or moved.
+    LaunchedEffect(folder, folders) {
+        if (folder != null && feeds.isNotEmpty() && folder !in folders) vm.setFolder(null)
+    }
+    val narrowed = (recentOnly && scope !is ListScope.Starred) || (folder != null && scope == ListScope.All)
     val hasQuery = !search.isNullOrBlank()
 
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -343,9 +395,6 @@ fun ArticleListScreen(
                                 vm.setNewestFirst(false); menuOpen = false
                             }
                             HorizontalDivider()
-                            CheckMenuItem("Nur ungelesene anzeigen", prefs.unreadOnly) {
-                                vm.setUnreadOnly(!prefs.unreadOnly); menuOpen = false
-                            }
                             CheckMenuItem("Beim Scrollen als gelesen markieren", prefs.markReadOnScroll) {
                                 vm.setMarkReadOnScroll(!prefs.markReadOnScroll); menuOpen = false
                             }
@@ -354,10 +403,23 @@ fun ArticleListScreen(
                 )
             },
         ) { padding ->
+          Column(Modifier.padding(padding).fillMaxSize()) {
+            if (!searching && scope !is ListScope.Starred && feeds.isNotEmpty()) {
+                QuickFilters(
+                    unreadOnly = prefs.unreadOnly,
+                    onUnreadOnly = vm::setUnreadOnly,
+                    recentOnly = recentOnly,
+                    onRecentOnly = vm::setRecentOnly,
+                    // Folders only make sense across feeds.
+                    folders = if (scope == ListScope.All) folders else emptyList(),
+                    folder = folder,
+                    onFolder = vm::setFolder,
+                )
+            }
             PullToRefreshBox(
                 isRefreshing = refreshing,
                 onRefresh = vm::refresh,
-                modifier = Modifier.padding(padding).fillMaxSize(),
+                modifier = Modifier.fillMaxSize(),
             ) {
                 val items = articles
                 when {
@@ -367,6 +429,7 @@ fun ArticleListScreen(
                             hasQuery -> "Keine Treffer für „${search.orEmpty().trim()}“."
                             feeds.isEmpty() -> "Noch keine Feeds abonniert."
                             scope is ListScope.Starred -> "Noch keine Artikel gemerkt.\nTippe bei einem Artikel auf den Stern."
+                            narrowed -> "Keine Artikel für diese Filter."
                             prefs.unreadOnly -> "Keine ungelesenen Artikel."
                             else -> "Keine Artikel. Zum Aktualisieren nach unten ziehen."
                         },
@@ -375,7 +438,7 @@ fun ArticleListScreen(
                     else -> ArticleList(
                         items = items,
                         // Search results keep their own scroll position, and browsing them marks nothing.
-                        listKey = if (hasQuery) "search" to scope else scope,
+                        listKey = if (hasQuery) "search" to scope else Triple(scope, recentOnly, folder),
                         markReadOnScroll = prefs.markReadOnScroll && !hasQuery,
                         onScrolledPast = vm::markRead,
                         onOpen = { onOpenArticle(it.id) },
@@ -384,6 +447,7 @@ fun ArticleListScreen(
                     )
                 }
             }
+          }
         }
     }
 
@@ -391,13 +455,72 @@ fun ArticleListScreen(
         AlertDialog(
             onDismissRequest = { confirmMarkAll = false },
             title = { Text("Als gelesen markieren?") },
-            text = { Text("Alle Artikel in „$title“ werden als gelesen markiert.") },
+            text = {
+                Text(
+                    if (narrowed) "Alle Artikel, die die Filter gerade anzeigen, werden als gelesen markiert."
+                    else "Alle Artikel in „$title“ werden als gelesen markiert.",
+                )
+            },
             confirmButton = {
                 TextButton(onClick = { vm.markAllRead(); confirmMarkAll = false }) { Text("Markieren") }
             },
             dismissButton = { TextButton(onClick = { confirmMarkAll = false }) { Text("Abbrechen") } },
         )
     }
+}
+
+/** Chips above the list: unread only, published in the last hours, one folder. They combine. */
+@Composable
+private fun QuickFilters(
+    unreadOnly: Boolean,
+    onUnreadOnly: (Boolean) -> Unit,
+    recentOnly: Boolean,
+    onRecentOnly: (Boolean) -> Unit,
+    folders: List<String>,
+    folder: String?,
+    onFolder: (String?) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilterChip(
+            selected = unreadOnly,
+            onClick = { onUnreadOnly(!unreadOnly) },
+            label = { Text("Ungelesen") },
+            leadingIcon = if (unreadOnly) checkIcon else null,
+        )
+        FilterChip(
+            selected = recentOnly,
+            onClick = { onRecentOnly(!recentOnly) },
+            label = { Text("Neu (${MainViewModel.RECENT_WINDOW_MS / 3_600_000} Std.)") },
+            leadingIcon = if (recentOnly) checkIcon else null,
+        )
+        if (folders.isNotEmpty()) {
+            var open by remember { mutableStateOf(false) }
+            Box {
+                FilterChip(
+                    selected = folder != null,
+                    onClick = { open = true },
+                    label = { Text(folder ?: "Ordner", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    leadingIcon = if (folder != null) checkIcon else null,
+                    trailingIcon = {
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Ordner wählen", Modifier.size(18.dp))
+                    },
+                )
+                DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                    DropdownMenuItem(text = { Text("Alle Ordner") }, onClick = { onFolder(null); open = false })
+                    folders.forEach { name ->
+                        DropdownMenuItem(text = { Text(name) }, onClick = { onFolder(name); open = false })
+                    }
+                }
+            }
+        }
+    }
+}
+
+private val checkIcon: @Composable () -> Unit = {
+    Icon(Icons.Default.Check, contentDescription = null, Modifier.size(18.dp))
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

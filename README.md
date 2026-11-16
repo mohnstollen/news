@@ -7,7 +7,8 @@ RSS-/Atom-Reader für Android (ab Android 8.0), geschrieben in Kotlin mit Jetpac
 - **Feeds** hinzufügen (mit Prüfung der Adresse; bei einer normalen Website wird der Feed
   gesucht), bearbeiten, in Ordner sortieren und löschen
 - **Anzeige**: alle Artikel, ein einzelner Feed oder die gemerkten Artikel; Sortierung nach
-  Datum (neueste oder älteste zuerst); optional nur ungelesene
+  Datum (neueste oder älteste zuerst); Schnellfilter für Ungelesene, Artikel der letzten
+  drei Stunden und einen Ordner
 - **Gelesen-Status**: automatisch beim Vorbeiscrollen (abschaltbar), per langem Druck auf einen
   Artikel, oder alle Artikel der aktuellen Ansicht auf einmal
 - **Merken** (Stern), **Notiz** (Stift) und **Teilen** für jeden Artikel

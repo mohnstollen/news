@@ -115,7 +115,7 @@ fun Context.openInBrowser(url: String) {
     }
 }
 
-/** The two icons that the core Material icon set lacks. */
+/** Icons that the core Material icon set lacks. */
 object AppIcons {
     private fun icon(name: String, path: String): ImageVector =
         ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
@@ -127,6 +127,20 @@ object AppIcons {
             "StarBorder",
             "M22,9.24l-7.19,-0.62L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21 12,16.77 18.18,21l-1.63,-7.03L22,9.24z" +
                 "M12,15.4l-3.76,2.27 1,-4.28 -3.32,-2.88 4.38,-0.38L12,6.1l1.71,4.04 4.38,0.38 -3.32,2.88 1,4.28L12,15.4z",
+        )
+    }
+
+    /** Lines of text: load or show the full article. */
+    val FullText: ImageVector by lazy {
+        icon("FullText", "M14,17L4,17v2h10v-2zM20,9L4,9v2h16L20,9zM4,15h16v-2L4,13v2zM4,5v2h16L20,5L4,5z")
+    }
+
+    /** Closed envelope: mark as unread. */
+    val MarkUnread: ImageVector by lazy {
+        icon(
+            "MarkUnread",
+            "M20,4L4,4c-1.1,0 -1.99,0.9 -1.99,2L2,18c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2L22,6c0,-1.1 -0.9,-2 -2,-2z" +
+                "M20,8l-8,5 -8,-5L4,6l8,5 8,-5v2z",
         )
     }
 

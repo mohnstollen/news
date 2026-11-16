@@ -26,7 +26,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -71,6 +74,10 @@ fun FeedsScreen(onBack: () -> Unit) {
     val feeds by remember { repo.feedDao.observeWithUnread() }.collectAsStateWithLifecycle(emptyList())
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
+
+    val folders = remember(feeds) {
+        feeds.mapNotNull { it.feed.category }.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
+    }
 
     var menuOpen by remember { mutableStateOf(false) }
     var addOpen by rememberSaveable { mutableStateOf(false) }
@@ -178,6 +185,7 @@ fun FeedsScreen(onBack: () -> Unit) {
 
     if (addOpen) {
         AddFeedDialog(
+            folders = folders,
             onAdd = { url, category -> repo.addFeed(url, category) },
             onAdded = { feed ->
                 addOpen = false
@@ -189,6 +197,7 @@ fun FeedsScreen(onBack: () -> Unit) {
     feeds.firstOrNull { it.feed.id == editId }?.let { entry ->
         EditFeedDialog(
             feed = entry.feed,
+            folders = folders,
             onSave = { title, url, category, fullText, notify ->
                 repo.updateFeed(entry.feed.id, title, url, category, fullText, notify)
             },
@@ -260,8 +269,44 @@ private fun FeedRow(entry: FeedWithUnread, onEdit: () -> Unit, onDelete: () -> U
     }
 }
 
+/** Folder input that offers the existing folders, so that a typo does not create a second one. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FolderField(value: String, onChange: (String) -> Unit, folders: List<String>, enabled: Boolean) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded && enabled && folders.isNotEmpty(),
+        onExpandedChange = { expanded = it },
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onChange,
+            label = { Text("Ordner (optional)") },
+            supportingText = if (folders.isEmpty()) null else {
+                { Text("Auswählen oder neuen Namen eingeben") }
+            },
+            trailingIcon = if (folders.isEmpty()) null else {
+                { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) }
+            },
+            singleLine = true,
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
+        )
+        ExposedDropdownMenu(expanded = expanded && enabled && folders.isNotEmpty(), onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("Kein Ordner", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                onClick = { onChange(""); expanded = false },
+            )
+            folders.forEach { folder ->
+                DropdownMenuItem(text = { Text(folder) }, onClick = { onChange(folder); expanded = false })
+            }
+        }
+    }
+}
+
 @Composable
 private fun AddFeedDialog(
+    folders: List<String>,
     onAdd: suspend (url: String, category: String?) -> Feed,
     onAdded: (Feed) -> Unit,
     onDismiss: () -> Unit,
@@ -289,14 +334,7 @@ private fun AddFeedDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
-                    value = category,
-                    onValueChange = { category = it },
-                    label = { Text("Ordner (optional)") },
-                    singleLine = true,
-                    enabled = !busy,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                FolderField(value = category, onChange = { category = it }, folders = folders, enabled = !busy)
                 if (busy) {
                     Text("Feed wird geprüft …", style = MaterialTheme.typography.bodySmall)
                     LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -329,6 +367,7 @@ private fun AddFeedDialog(
 @Composable
 private fun EditFeedDialog(
     feed: Feed,
+    folders: List<String>,
     onSave: suspend (title: String, url: String, category: String?, fetchFullText: Boolean, notify: Boolean) -> Unit,
     onSaved: () -> Unit,
     onDismiss: () -> Unit,
@@ -367,14 +406,7 @@ private fun EditFeedDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
-                    value = category,
-                    onValueChange = { category = it },
-                    label = { Text("Ordner (optional)") },
-                    singleLine = true,
-                    enabled = !busy,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                FolderField(value = category, onChange = { category = it }, folders = folders, enabled = !busy)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Volltext automatisch laden")

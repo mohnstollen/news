@@ -104,6 +104,8 @@ data class ArticleListItem(
     val read: Boolean,
     val starred: Boolean,
     val hasNote: Boolean,
+    /** Folder of the article's feed. */
+    val category: String? = null,
 )
 
 data class ArticleSyncRow(
@@ -182,7 +184,7 @@ interface FeedDao {
 interface ArticleDao {
     @Query(
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
-            "(a.note IS NOT NULL AND a.note != '') AS hasNote " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId " +
             "WHERE (:feedId IS NULL OR a.feedId = :feedId) AND (:starredOnly = 0 OR a.starred = 1) " +
             "ORDER BY a.pubDate DESC, a.id DESC LIMIT 5000",
@@ -192,7 +194,7 @@ interface ArticleDao {
     /** [match] is an FTS expression, see [SearchQuery]. Read articles are included. */
     @Query(
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
-            "(a.note IS NOT NULL AND a.note != '') AS hasNote " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId JOIN articles_fts ON articles_fts.docid = a.id " +
             "WHERE articles_fts MATCH :match " +
             "AND (:feedId IS NULL OR a.feedId = :feedId) AND (:starredOnly = 0 OR a.starred = 1) " +
@@ -202,7 +204,7 @@ interface ArticleDao {
 
     @Query(
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
-            "(a.note IS NOT NULL AND a.note != '') AS hasNote " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId WHERE a.id IN (:ids) " +
             "ORDER BY a.pubDate DESC, a.id DESC",
     )
