@@ -11,6 +11,8 @@ RSS-/Atom-Reader für Android (ab Android 8.0), geschrieben in Kotlin mit Jetpac
   drei Stunden und einen Ordner
 - **Gelesen-Status**: automatisch beim Vorbeiscrollen (abschaltbar), per langem Druck auf einen
   Artikel, oder alle Artikel der aktuellen Ansicht auf einmal
+- **Aufgeräumte Liste**: gelesene Artikel verschwinden nach einstellbarer Zeit aus den Listen
+  (Standard: ein Tag) und bleiben über die Suche auffindbar
 - **Merken** (Stern), **Notiz** (Stift) und **Teilen** für jeden Artikel
 - **Offline**: Artikel liegen in einer lokalen Datenbank. Der **Volltext** der verlinkten Seite
   lässt sich pro Artikel laden oder pro Feed automatisch bei jedem Update

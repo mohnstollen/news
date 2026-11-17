@@ -24,7 +24,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -52,6 +56,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.mohnstollen.news.data.DEFAULT_INTERVAL_MINUTES
 import io.github.mohnstollen.news.data.MIN_INTERVAL_MINUTES
 import io.github.mohnstollen.news.data.Prefs
+import io.github.mohnstollen.news.data.ReadVisibility
 import io.github.mohnstollen.news.work.RefreshWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -136,10 +141,15 @@ fun SettingsScreen(onBack: () -> Unit) {
                 checked = prefs.markReadOnScroll,
                 onChange = { value -> settings.update { it.copy(markReadOnScroll = value) } },
             )
+            HideReadField(
+                minutes = prefs.hideReadAfterMinutes,
+                onChange = { value -> settings.update { it.copy(hideReadAfterMinutes = value) } },
+            )
             NumberField(
-                label = "Gelesene Artikel behalten (Tage)",
+                label = "Gelesene Artikel löschen nach (Tagen)",
                 value = prefs.retentionDays,
-                hint = "0 = nie löschen. Gemerkte Artikel und Artikel mit Notiz bleiben immer erhalten.",
+                hint = "0 = nie löschen. Gelöscht wird, sobald der Feed den Artikel nicht mehr führt. " +
+                    "Gemerkte Artikel und Artikel mit Notiz bleiben immer erhalten.",
                 isValid = { it >= 0 },
                 onValid = { value -> settings.update { it.copy(retentionDays = value) } },
             )
@@ -169,6 +179,47 @@ fun SettingsScreen(onBack: () -> Unit) {
                 onChange = { value -> settings.update { it.copy(ncAutoSync = value) } },
             )
             Spacer(Modifier.height(32.dp))
+        }
+    }
+}
+
+private val hideReadOptions = listOf(
+    0 to "Sofort",
+    60 to "Nach 1 Stunde",
+    24 * 60 to "Nach 1 Tag",
+    7 * 24 * 60 to "Nach 1 Woche",
+    ReadVisibility.NEVER to "Nie",
+)
+
+/** When read articles leave the article lists. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HideReadField(minutes: Int, onChange: (Int) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val label = hideReadOptions.firstOrNull { it.first == minutes }?.second ?: "Nach $minutes Minuten"
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        OutlinedTextField(
+            value = label,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Gelesene Artikel ausblenden") },
+            supportingText = {
+                Text(
+                    "Gelesene Artikel verschwinden aus den Listen. Über die Suche und unter „Gemerkt“ " +
+                        "bleiben sie auffindbar.",
+                )
+            },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            hideReadOptions.forEach { (value, text) ->
+                DropdownMenuItem(text = { Text(text) }, onClick = { onChange(value); expanded = false })
+            }
         }
     }
 }

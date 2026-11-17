@@ -65,6 +65,8 @@ data class Article(
     val pubDate: Long,
     val fetchedAt: Long,
     val read: Boolean = false,
+    /** When it was marked read; 0 while unread. Read articles drop out of the lists after a while. */
+    @ColumnInfo(defaultValue = "0") val readAt: Long = 0,
     val starred: Boolean = false,
     val note: String? = null,
     /** Last time star or note changed; 0 if never. Used for sync. */
@@ -106,6 +108,8 @@ data class ArticleListItem(
     val hasNote: Boolean,
     /** Folder of the article's feed. */
     val category: String? = null,
+    /** When it was marked read; 0 if unread or read before this was recorded. */
+    val readAt: Long = 0,
 )
 
 data class ArticleSyncRow(
@@ -188,7 +192,7 @@ interface FeedDao {
 interface ArticleDao {
     @Query(
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
-            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId " +
             "WHERE (:feedId IS NULL OR a.feedId = :feedId) AND (:starredOnly = 0 OR a.starred = 1) " +
             "ORDER BY a.pubDate DESC, a.id DESC LIMIT 5000",
@@ -198,7 +202,7 @@ interface ArticleDao {
     /** [match] is an FTS expression, see [SearchQuery]. Read articles are included. */
     @Query(
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
-            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId JOIN articles_fts ON articles_fts.docid = a.id " +
             "WHERE articles_fts MATCH :match " +
             "AND (:feedId IS NULL OR a.feedId = :feedId) AND (:starredOnly = 0 OR a.starred = 1) " +
@@ -208,7 +212,7 @@ interface ArticleDao {
 
     @Query(
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
-            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId WHERE a.id IN (:ids) " +
             "ORDER BY a.pubDate DESC, a.id DESC",
     )
@@ -216,7 +220,7 @@ interface ArticleDao {
 
     @Query(
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
-            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId WHERE a.read = 0 " +
             "ORDER BY a.pubDate DESC, a.id DESC LIMIT :limit",
     )
@@ -241,14 +245,15 @@ interface ArticleDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(articles: List<Article>): List<Long>
 
-    @Query("UPDATE articles SET read = :read WHERE id IN (:ids)")
-    suspend fun setRead(ids: List<Long>, read: Boolean)
+    /** [readAt] is the current time when marking read, 0 when marking unread. */
+    @Query("UPDATE articles SET read = :read, readAt = :readAt WHERE id IN (:ids)")
+    suspend fun setRead(ids: List<Long>, read: Boolean, readAt: Long)
 
     @Query(
-        "UPDATE articles SET read = 1 WHERE read = 0 " +
+        "UPDATE articles SET read = 1, readAt = :now WHERE read = 0 " +
             "AND (:feedId IS NULL OR feedId = :feedId) AND (:starredOnly = 0 OR starred = 1)",
     )
-    suspend fun markAllRead(feedId: Long?, starredOnly: Boolean)
+    suspend fun markAllRead(feedId: Long?, starredOnly: Boolean, now: Long)
 
     @Query("UPDATE articles SET starred = :starred, stateUpdatedAt = :now WHERE id = :id")
     suspend fun setStarred(id: Long, starred: Boolean, now: Long)
@@ -287,7 +292,7 @@ interface ArticleDao {
 
 @Database(
     entities = [Feed::class, Article::class, DeletedFeed::class, ArticleFts::class],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -307,7 +312,28 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("INSERT INTO articles_fts(articles_fts) VALUES('rebuild')")
             }
         }
+
+        /** Records when an article was read. Articles read before count as read long ago. */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE articles ADD COLUMN readAt INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
     }
+}
+
+/** Whether a list still shows an article, given the "hide read articles" setting. */
+object ReadVisibility {
+    const val NEVER = -1
+
+    /**
+     * [hideAfterMinutes]: [NEVER] keeps read articles in the list, 0 drops them at once, otherwise
+     * they stay for that long after being read.
+     */
+    fun isVisible(read: Boolean, readAt: Long, hideAfterMinutes: Int, now: Long): Boolean =
+        !read || hideAfterMinutes == NEVER || (hideAfterMinutes > 0 && readAt > now - hideAfterMinutes * 60_000L)
 }
 
 /** Turns what the user typed into an FTS expression: every word must occur, as a word prefix. */

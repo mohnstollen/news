@@ -1,6 +1,7 @@
 package io.github.mohnstollen.news
 
 import io.github.mohnstollen.news.data.DavUrls
+import io.github.mohnstollen.news.data.ReadVisibility
 import io.github.mohnstollen.news.data.SyncArticle
 import io.github.mohnstollen.news.data.SyncFeed
 import io.github.mohnstollen.news.data.SyncMerge
@@ -74,6 +75,26 @@ class SyncTest {
         assertFalse("article of a deleted feed is dropped", "3" in merged)
         assertFalse("stale inactive entry is pruned", "4" in merged)
         assertTrue("old but still starred is kept", "5" in merged)
+    }
+
+    @Test
+    fun readArticlesLeaveTheListAfterTheChosenTime() {
+        val hour = 60 * 60_000L
+        fun visible(read: Boolean, readAt: Long, minutes: Int) = ReadVisibility.isVisible(read, readAt, minutes, now)
+
+        // Unread articles always stay.
+        assertTrue(visible(false, 0, 0))
+        assertTrue(visible(false, 0, 60))
+        // "Never" keeps everything, "at once" nothing that is read.
+        assertTrue(visible(true, 0, ReadVisibility.NEVER))
+        assertFalse(visible(true, now, 0))
+        // Otherwise for the chosen time after reading.
+        assertTrue(visible(true, now - hour + 1000, 60))
+        assertFalse(visible(true, now - hour - 1000, 60))
+        assertTrue(visible(true, now - 23 * hour, 24 * 60))
+        assertFalse(visible(true, now - 25 * hour, 24 * 60))
+        // Read before the time was recorded: counts as long ago.
+        assertFalse(visible(true, 0, 7 * 24 * 60))
     }
 
     @Test

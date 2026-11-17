@@ -59,6 +59,11 @@ class WidgetTest {
         val now = System.currentTimeMillis()
         seed(now)
         val id = widgets.createWidget(NewsWidgetProvider::class.java, R.layout.widget)
+        // Placing the widget draws it in the background; let that finish before drawing again here.
+        val deadline = System.currentTimeMillis() + 10_000
+        while (text(widgets.getViewFor(id), R.id.widget_status).isEmpty() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20)
+        }
         runBlocking { NewsWidget.updateAll(context) }
 
         val status = text(widgets.getViewFor(id), R.id.widget_status)
@@ -74,7 +79,7 @@ class WidgetTest {
 
         // Reading everything empties the list.
         runBlocking {
-            repo.articleDao.markAllRead(null, false)
+            repo.articleDao.markAllRead(null, false, System.currentTimeMillis())
             NewsWidget.updateAll(context)
         }
         rows.onDataSetChanged()

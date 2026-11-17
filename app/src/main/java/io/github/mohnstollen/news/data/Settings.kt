@@ -24,6 +24,8 @@ data class Prefs(
     val newestFirst: Boolean = true,
     /** Read articles older than this are removed once their feed no longer lists them. 0 = keep. */
     val retentionDays: Int = 90,
+    /** Minutes a read article stays in the lists; see [ReadVisibility]. */
+    val hideReadAfterMinutes: Int = 24 * 60,
     /** Announce articles found by a background update. */
     val notifyNewArticles: Boolean = false,
     /** How often a placed home screen widget loads the feeds and redraws. */
@@ -57,6 +59,7 @@ class SettingsStore(context: Context) {
             unreadOnly = sp.getBoolean("unreadOnly", d.unreadOnly),
             newestFirst = sp.getBoolean("newestFirst", d.newestFirst),
             retentionDays = sp.getInt("retentionDays", d.retentionDays),
+            hideReadAfterMinutes = sp.getInt("hideReadAfterMinutes", d.hideReadAfterMinutes),
             notifyNewArticles = sp.getBoolean("notifyNewArticles", d.notifyNewArticles),
             widgetIntervalMinutes = sp.getInt("widgetIntervalMinutes", d.widgetIntervalMinutes),
             ncServer = sp.getString("ncServer", d.ncServer)!!,
@@ -79,6 +82,7 @@ class SettingsStore(context: Context) {
             .putBoolean("unreadOnly", p.unreadOnly)
             .putBoolean("newestFirst", p.newestFirst)
             .putInt("retentionDays", p.retentionDays)
+            .putInt("hideReadAfterMinutes", p.hideReadAfterMinutes)
             .putBoolean("notifyNewArticles", p.notifyNewArticles)
             .putInt("widgetIntervalMinutes", p.widgetIntervalMinutes)
             .putString("ncServer", p.ncServer)
