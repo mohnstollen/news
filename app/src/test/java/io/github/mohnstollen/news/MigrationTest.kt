@@ -59,7 +59,7 @@ class MigrationTest {
 
         // Room checks the migrated schema against the current entities when it opens the file.
         val db = Room.databaseBuilder(context, AppDatabase::class.java, "migration.db")
-            .addMigrations(AppDatabase.MIGRATION_1_2).build()
+            .addMigrations(*AppDatabase.MIGRATIONS).build()
         try {
             val feed = db.feedDao().all().single()
             assertEquals("Alt", feed.title)
@@ -68,6 +68,8 @@ class MigrationTest {
             val article = db.articleDao().byId(7)!!
             assertEquals("Meine Notiz", article.note)
             assertTrue(article.starred)
+            assertTrue(article.read)
+            assertEquals("read before this was recorded", 0L, article.readAt)
 
             // Existing articles are searchable, and so are later changes.
             suspend fun search(text: String) =

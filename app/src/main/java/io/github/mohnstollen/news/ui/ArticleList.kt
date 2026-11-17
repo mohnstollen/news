@@ -88,6 +88,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import io.github.mohnstollen.news.data.ArticleListItem
 import io.github.mohnstollen.news.data.FeedWithUnread
+import io.github.mohnstollen.news.data.ReadVisibility
 import io.github.mohnstollen.news.data.SearchQuery
 import io.github.mohnstollen.news.ui.MainViewModel.ListScope
 import kotlinx.coroutines.Dispatchers
@@ -170,13 +171,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 .debounce { if (it == null) 0L else 250L },
         ) { scope, match -> scope to match }
         .flatMapLatest { (scope, match) ->
-            val filter = prefs.map { it.unreadOnly to it.newestFirst }.distinctUntilChanged()
+            val filter = prefs.map { ListPrefs(it.unreadOnly, it.newestFirst, it.hideReadAfterMinutes) }
+                .distinctUntilChanged()
             val feedId = (scope as? ListScope.Single)?.feedId
             if (match != null) {
                 return@flatMapLatest combine(
                     repo.articleDao.observeSearch(match, feedId, scope is ListScope.Starred),
                     filter,
-                ) { hits, (_, newestFirst) -> if (newestFirst) hits else hits.asReversed() }
+                ) { hits, listPrefs -> if (listPrefs.newestFirst) hits else hits.asReversed() }
             }
             combine(
                 repo.articleDao.observeList((scope as? ListScope.Single)?.feedId, scope is ListScope.Starred),
@@ -184,13 +186,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 keepVisible,
                 _recentOnly,
                 _folder,
-            ) { all, (unreadOnly, newestFirst), keep, recentOnly, folder ->
+            ) { all, (unreadOnly, newestFirst, hideReadAfter), keep, recentOnly, folder ->
+                val now = System.currentTimeMillis()
                 // The quick filters belong to the article lists; the starred list shows everything.
                 val filterable = scope !is ListScope.Starred
-                val since = if (recentOnly && filterable) System.currentTimeMillis() - RECENT_WINDOW_MS else null
+                val since = if (recentOnly && filterable) now - RECENT_WINDOW_MS else null
                 val inFolder = folder.takeIf { scope is ListScope.All }
                 val filtered = all.filter { item ->
                     (!unreadOnly || !filterable || !item.read || item.id in keep) &&
+                        // Read articles drop out after the time from the settings. The search still finds them.
+                        (!filterable || item.id in keep ||
+                            ReadVisibility.isVisible(item.read, item.readAt, hideReadAfter, now)) &&
                         (since == null || item.pubDate >= since) &&
                         (inFolder == null || item.category == inFolder)
                 }
@@ -252,9 +258,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         keepVisible.value = emptySet()
         viewModelScope.launch {
             if (shown != null) repo.setRead(shown, true)
-            else repo.articleDao.markAllRead((scope as? ListScope.Single)?.feedId, scope is ListScope.Starred)
+            else repo.articleDao.markAllRead(
+                (scope as? ListScope.Single)?.feedId, scope is ListScope.Starred, System.currentTimeMillis(),
+            )
         }
     }
+
+    private data class ListPrefs(val unreadOnly: Boolean, val newestFirst: Boolean, val hideReadAfterMinutes: Int)
 
     companion object {
         const val RECENT_WINDOW_MS = 3 * 60 * 60 * 1000L
@@ -430,7 +440,8 @@ fun ArticleListScreen(
                             feeds.isEmpty() -> "Noch keine Feeds abonniert."
                             scope is ListScope.Starred -> "Noch keine Artikel gemerkt.\nTippe bei einem Artikel auf den Stern."
                             narrowed -> "Keine Artikel für diese Filter."
-                            prefs.unreadOnly -> "Keine ungelesenen Artikel."
+                            prefs.unreadOnly || prefs.hideReadAfterMinutes != ReadVisibility.NEVER ->
+                                "Keine ungelesenen Artikel."
                             else -> "Keine Artikel. Zum Aktualisieren nach unten ziehen."
                         },
                         action = if (feeds.isEmpty() && !hasQuery) "Feed hinzufügen" to onOpenFeeds else null,

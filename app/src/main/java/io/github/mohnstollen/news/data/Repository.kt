@@ -236,7 +236,8 @@ class Repository(
     // ---- article state ----------------------------------------------------------------------
 
     suspend fun setRead(ids: List<Long>, read: Boolean) {
-        ids.chunked(MAX_SQL_VARIABLES).forEach { articleDao.setRead(it, read) }
+        val readAt = if (read) System.currentTimeMillis() else 0L
+        ids.chunked(MAX_SQL_VARIABLES).forEach { articleDao.setRead(it, read, readAt) }
     }
 
     suspend fun setStarred(id: Long, starred: Boolean) =

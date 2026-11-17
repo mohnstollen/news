@@ -135,6 +135,7 @@ class QuickFilterUiTest : UiTestBase() {
             )
             fun article(guid: String, title: String, age: Long, read: Boolean) = Article(
                 feedId = feedId, guid = guid, title = title, pubDate = now - age, fetchedAt = now, read = read,
+                readAt = if (read) now else 0,
             )
             repo.articleDao.insertAll(
                 listOf(
@@ -189,6 +190,52 @@ class QuickFilterUiTest : UiTestBase() {
         clickable("Technik").performClick()
         gone("Kein Ordner")
         compose.onNode(hasText("Technik") and hasSetTextAction()).assertIsDisplayed()
+    }
+}
+
+class HideReadUiTest : UiTestBase() {
+    private fun hideAfter(minutes: Int) {
+        context.container.settings.update { it.copy(hideReadAfterMinutes = minutes) }
+        compose.waitForIdle()
+    }
+
+    @Test(timeout = 120000)
+    fun readArticlesLeaveTheListAsSetInTheSettings() {
+        waitFor("Artikel Nummer 1")
+        assertEquals("a day by default", 24 * 60, context.container.settings.current.hideReadAfterMinutes)
+
+        // Read just now: still listed with the default.
+        compose.onNodeWithText("Artikel Nummer 1").performClick()
+        compose.waitUntil(5_000) { article(1).read }
+        assertTrue(article(1).readAt > 0)
+        compose.onNodeWithContentDescription("Zurück").performClick()
+        waitFor("Artikel Nummer 1")
+
+        // "At once": gone from the list, the unread ones stay.
+        hideAfter(0)
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Artikel Nummer 1").fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithText("Artikel Nummer 2").assertIsDisplayed()
+
+        // The search still finds it.
+        compose.onNodeWithContentDescription("Suchen").performClick()
+        compose.onNodeWithText("Alle Artikel durchsuchen").performTextInput("nummer 1")
+        waitFor("Artikel Nummer 1")
+        compose.onNodeWithContentDescription("Suche schließen").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Artikel Nummer 1").fetchSemanticsNodes().isEmpty() }
+
+        // Marking it unread brings it back; "never" shows read articles again.
+        runBlocking { repo.setRead(listOf(article(1).id), false) }
+        waitFor("Artikel Nummer 1")
+        assertEquals(0L, article(1).readAt)
+        runBlocking { repo.setRead(listOf(article(1).id), true) }
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Artikel Nummer 1").fetchSemanticsNodes().isEmpty() }
+        hideAfter(io.github.mohnstollen.news.data.ReadVisibility.NEVER)
+        waitFor("Artikel Nummer 1")
+
+        // The setting is on the settings screen.
+        compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
+        compose.onNodeWithText("Einstellungen").performClick()
+        waitFor("Gelesene Artikel ausblenden")
     }
 }
 
