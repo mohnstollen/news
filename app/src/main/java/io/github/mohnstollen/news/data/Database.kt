@@ -69,6 +69,8 @@ data class Article(
     val note: String? = null,
     /** Last time star or note changed; 0 if never. Used for sync. */
     val stateUpdatedAt: Long = 0,
+    /** Last time the user marked it read or unread; 0 if never. Used for syncing the read state. */
+    @ColumnInfo(defaultValue = "0") val readUpdatedAt: Long = 0,
 )
 
 /** Full-text index over the searchable columns of [Article]; Room keeps it in sync. */
@@ -108,6 +110,13 @@ data class ArticleListItem(
     val category: String? = null,
     /** When it was marked read; 0 if unread or read before this was recorded. */
     val readAt: Long = 0,
+)
+
+data class ReadSyncRow(
+    val feedUrl: String,
+    val guid: String,
+    val read: Boolean,
+    val readUpdatedAt: Long,
 )
 
 data class ArticleSyncRow(
@@ -244,11 +253,11 @@ interface ArticleDao {
     suspend fun insertAll(articles: List<Article>): List<Long>
 
     /** [readAt] is the current time when marking read, 0 when marking unread. */
-    @Query("UPDATE articles SET read = :read, readAt = :readAt WHERE id IN (:ids)")
-    suspend fun setRead(ids: List<Long>, read: Boolean, readAt: Long)
+    @Query("UPDATE articles SET read = :read, readAt = :readAt, readUpdatedAt = :now WHERE id IN (:ids)")
+    suspend fun setRead(ids: List<Long>, read: Boolean, readAt: Long, now: Long)
 
     @Query(
-        "UPDATE articles SET read = 1, readAt = :now WHERE read = 0 " +
+        "UPDATE articles SET read = 1, readAt = :now, readUpdatedAt = :now WHERE read = 0 " +
             "AND (:feedId IS NULL OR feedId = :feedId) AND (:starredOnly = 0 OR starred = 1)",
     )
     suspend fun markAllRead(feedId: Long?, starredOnly: Boolean, now: Long)
@@ -261,6 +270,16 @@ interface ArticleDao {
 
     @Query("UPDATE articles SET starred = :starred, note = :note, stateUpdatedAt = :stateUpdatedAt WHERE id = :id")
     suspend fun applySyncedState(id: Long, starred: Boolean, note: String?, stateUpdatedAt: Long)
+
+    @Query("UPDATE articles SET read = :read, readAt = :readAt, readUpdatedAt = :updatedAt WHERE id = :id")
+    suspend fun applySyncedRead(id: Long, read: Boolean, readAt: Long, updatedAt: Long)
+
+    /** Read or unread markings made after [since], for syncing. */
+    @Query(
+        "SELECT f.url AS feedUrl, a.guid, a.read, a.readUpdatedAt " +
+            "FROM articles a JOIN feeds f ON f.id = a.feedId WHERE a.readUpdatedAt > :since",
+    )
+    suspend fun readSyncRows(since: Long): List<ReadSyncRow>
 
     @Query("UPDATE articles SET fullText = :html WHERE id = :id")
     suspend fun setFullText(id: Long, html: String?)
@@ -290,7 +309,7 @@ interface ArticleDao {
 
 @Database(
     entities = [Feed::class, Article::class, DeletedFeed::class, ArticleFts::class],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {

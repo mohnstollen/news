@@ -70,7 +70,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "news-reader"
-            packageVersion = "1.4.0"
+            packageVersion = "1.5.0"
             description = "RSS- und Atom-Reader"
             vendor = "mohnstollen"
             // As reported by suggestRuntimeModules; keeps the bundled Java runtime small.

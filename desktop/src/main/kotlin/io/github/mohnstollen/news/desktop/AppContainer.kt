@@ -5,6 +5,7 @@ import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import io.github.mohnstollen.news.data.AppDatabase
 import io.github.mohnstollen.news.data.AppDatabase_Impl
 import io.github.mohnstollen.news.data.AppDirs
+import io.github.mohnstollen.news.data.DesktopMigrations
 import io.github.mohnstollen.news.data.FeedFetcher
 import io.github.mohnstollen.news.data.FullTextExtractor
 import io.github.mohnstollen.news.data.Repository
@@ -22,6 +23,7 @@ fun openDatabase(file: File?): AppDatabase {
     }
     return builder
         .setDriver(BundledSQLiteDriver())
+        .addMigrations(*DesktopMigrations.ALL)
         .setQueryCoroutineContext(Dispatchers.IO)
         .build()
 }

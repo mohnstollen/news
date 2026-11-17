@@ -196,7 +196,8 @@ fun MainScreen(
                 if (openId == null) {
                     Text(
                         "Wähle links einen Artikel aus.\n\nTastatur: J/K nächster/vorheriger Artikel, S merken, " +
-                            "M gelesen/ungelesen, V im Browser öffnen, Strg+F suchen, F5 aktualisieren.",
+                            "M als ungelesen markieren, V im Browser öffnen, Strg+F suchen, F5 aktualisieren, " +
+                            "Strg+B Feed-Leiste, Strg+, Einstellungen, Strg+Q beenden.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.align(Alignment.Center).padding(48.dp),

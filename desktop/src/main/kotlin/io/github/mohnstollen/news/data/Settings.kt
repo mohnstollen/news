@@ -24,16 +24,27 @@ data class Prefs(
     val hideReadAfterMinutes: Int = 24 * 60,
     /** Announce articles found by a background update. */
     val notifyNewArticles: Boolean = false,
+    /** [Theme.SYSTEM] follows the desktop's light or dark setting. */
+    val theme: String = Theme.SYSTEM,
     /** Closing the window keeps the app running in the system tray, so updates go on. */
     val keepInTray: Boolean = true,
     val ncServer: String = "",
     val ncUser: String = "",
     val ncFolder: String = "News",
     val ncAutoSync: Boolean = true,
+    /** Also sync which articles are read. */
+    val ncSyncRead: Boolean = true,
     val lastSync: Long = 0,
     val lastSyncError: String? = null,
 ) {
     val syncConfigured: Boolean get() = ncServer.isNotBlank() && ncUser.isNotBlank()
+}
+
+object Theme {
+    const val SYSTEM = "system"
+    const val LIGHT = "light"
+    const val DARK = "dark"
+    val ALL = setOf(SYSTEM, LIGHT, DARK)
 }
 
 /** Where the app keeps its files, following the XDG base directory spec. */
@@ -73,11 +84,13 @@ class SettingsStore(
             retentionDays = int("retentionDays", d.retentionDays),
             hideReadAfterMinutes = int("hideReadAfterMinutes", d.hideReadAfterMinutes),
             notifyNewArticles = bool("notifyNewArticles", d.notifyNewArticles),
+            theme = p.getProperty("theme")?.takeIf { it in Theme.ALL } ?: d.theme,
             keepInTray = bool("keepInTray", d.keepInTray),
             ncServer = p.getProperty("ncServer") ?: d.ncServer,
             ncUser = p.getProperty("ncUser") ?: d.ncUser,
             ncFolder = p.getProperty("ncFolder") ?: d.ncFolder,
             ncAutoSync = bool("ncAutoSync", d.ncAutoSync),
+            ncSyncRead = bool("ncSyncRead", d.ncSyncRead),
             lastSync = p.getProperty("lastSync")?.toLongOrNull() ?: d.lastSync,
             lastSyncError = p.getProperty("lastSyncError"),
         )
@@ -95,11 +108,13 @@ class SettingsStore(
         p["retentionDays"] = v.retentionDays.toString()
         p["hideReadAfterMinutes"] = v.hideReadAfterMinutes.toString()
         p["notifyNewArticles"] = v.notifyNewArticles.toString()
+        p["theme"] = v.theme
         p["keepInTray"] = v.keepInTray.toString()
         p["ncServer"] = v.ncServer
         p["ncUser"] = v.ncUser
         p["ncFolder"] = v.ncFolder
         p["ncAutoSync"] = v.ncAutoSync.toString()
+        p["ncSyncRead"] = v.ncSyncRead.toString()
         p["lastSync"] = v.lastSync.toString()
         v.lastSyncError?.let { p["lastSyncError"] = it }
         writeAtomically(file) { out -> p.store(out, "News") }

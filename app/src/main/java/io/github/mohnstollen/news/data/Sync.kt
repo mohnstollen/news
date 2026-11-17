@@ -20,6 +20,12 @@ data class SyncState(
     val version: Int = 1,
     val feeds: List<SyncFeed> = emptyList(),
     val articles: List<SyncArticle> = emptyList(),
+    /**
+     * Read state per feed address and article guid: the time of the last change, positive if the
+     * article was marked read then and negative if it was marked unread. Only recent changes are
+     * kept (see [SyncMerge.READ_KEEP_MS]) so that the file stays small.
+     */
+    val reads: Map<String, Map<String, Long>> = emptyMap(),
 )
 
 @Serializable
@@ -50,6 +56,9 @@ data class SyncArticle(
 object SyncMerge {
     private const val INACTIVE_KEEP_MS = 180L * 24 * 60 * 60 * 1000
 
+    /** How long a read or unread marking is kept in the sync file. */
+    const val READ_KEEP_MS = 21L * 24 * 60 * 60 * 1000
+
     /** Per feed and per article the most recent change wins; on a tie the local side wins. */
     fun merge(local: SyncState, remote: SyncState, now: Long): SyncState {
         val feeds = (local.feeds + remote.feeds)
@@ -62,7 +71,33 @@ object SyncMerge {
             .filter { it.feedUrl in liveUrls }
             // Un-starred entries are kept for a while so the removal reaches the other devices.
             .filter { it.starred || !it.note.isNullOrBlank() || now - it.updatedAt < INACTIVE_KEEP_MS }
-        return SyncState(feeds = feeds.sortedBy { it.url }, articles = articles.sortedBy { it.updatedAt })
+        return SyncState(
+            feeds = feeds.sortedBy { it.url },
+            articles = articles.sortedBy { it.updatedAt },
+            reads = mergeReads(local.reads, remote.reads, liveUrls, now - READ_KEEP_MS),
+        )
+    }
+
+    /** The more recent marking wins; on a tie the local side wins. Old markings are dropped. */
+    private fun mergeReads(
+        local: Map<String, Map<String, Long>>,
+        remote: Map<String, Map<String, Long>>,
+        liveUrls: Set<String>,
+        cutoff: Long,
+    ): Map<String, Map<String, Long>> {
+        val result = sortedMapOf<String, java.util.SortedMap<String, Long>>()
+        for (source in listOf(local, remote)) {
+            for ((feedUrl, entries) in source) {
+                if (feedUrl !in liveUrls) continue
+                val target = result.getOrPut(feedUrl) { sortedMapOf() }
+                for ((guid, marked) in entries) {
+                    if (kotlin.math.abs(marked) < cutoff) continue
+                    val existing = target[guid]
+                    if (existing == null || kotlin.math.abs(marked) > kotlin.math.abs(existing)) target[guid] = marked
+                }
+            }
+        }
+        return result.filterValues { it.isNotEmpty() }
     }
 }
 
@@ -158,8 +193,9 @@ class SyncManager(
                     }
                 } ?: SyncState()
 
-                val merged = SyncMerge.merge(repository.exportSyncState(), remote, System.currentTimeMillis())
-                val added = repository.applySyncState(merged)
+                val now = System.currentTimeMillis()
+                val merged = SyncMerge.merge(repository.exportSyncState(includeReads = prefs.ncSyncRead), remote, now)
+                val added = repository.applySyncState(merged, applyReads = prefs.ncSyncRead)
                 dav.put(stateUrl, json.encodeToString(SyncState.serializer(), merged), "application/json")
                 // A plain OPML copy, so the subscriptions are usable with other apps too.
                 dav.put(DavUrls.child(folder, OPML_FILE), repository.exportOpml(), "text/x-opml")

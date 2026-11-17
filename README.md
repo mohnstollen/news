@@ -24,7 +24,8 @@ bzw. Compose for Desktop.
 - **Widget** für den Startbildschirm mit den neuesten ungelesenen Artikeln und eigenem,
   einstellbarem Aktualisierungsintervall
 - **OPML** Import und Export
-- **Nextcloud** (WebDAV): gleicht Feeds, gemerkte Artikel und Notizen zwischen Geräten ab
+- **Nextcloud** (WebDAV): gleicht Feeds, gemerkte Artikel, Notizen und den Gelesen-Status
+  zwischen Geräten ab
 
 ## Bauen
 
@@ -54,6 +55,10 @@ Unterschiede zur Android-App:
 - **Tastatur**: J/K nächster/vorheriger Artikel, S merken, M als ungelesen markieren,
   V im Browser öffnen, Strg+F suchen, F5 oder Strg+R aktualisieren, Esc schließen
 - **Kontextmenü** (Rechtsklick) statt langem Druck; **Link kopieren** statt Teilen
+- **Design** hell, dunkel oder wie der Desktop: erkennt das dunkle Design von Xfce, GNOME,
+  Cinnamon, MATE und KDE und folgt Änderungen während des Betriebs
+- Weitere Tasten: Strg+, Einstellungen, Strg+1/Strg+2 alle bzw. gemerkte Artikel,
+  Strg+W Fenster schließen, Strg+Q beenden
 - **Hintergrund**: Aktualisierung läuft, solange die App läuft. Beim Schließen bleibt sie auf
   Wunsch im Systembereich der Leiste (Tray) und kann beim Anmelden unsichtbar starten.
   Benachrichtigungen kommen über `notify-send`
@@ -87,11 +92,15 @@ In den Einstellungen Server-Adresse, Benutzername und ein App-Passwort eintragen
 im gewählten Ordner zwei Dateien an:
 
 - `news-sync.json`: Feeds (inklusive gelöschter, damit sie nicht zurückkommen), gemerkte
-  Artikel und Notizen. Bei Konflikten gewinnt pro Feed bzw. Artikel die jüngste Änderung.
+  Artikel, Notizen und der Gelesen-Status. Bei Konflikten gewinnt pro Feed bzw. Artikel die
+  jüngste Änderung.
 - `feeds.opml`: Kopie der Abonnements für andere Programme. Wird nur geschrieben, nie gelesen.
 
-Der Gelesen-Status wird nicht synchronisiert. Das Passwort wird verschlüsselt im Android
-Keystore abgelegt.
+Der Gelesen-Status (abschaltbar) umfasst die Markierungen der letzten drei Wochen, damit die Datei
+klein bleibt. Artikel, die ein anderes Gerät schon gelesen hat, kommen beim nächsten Update als
+gelesen an und lösen keine Benachrichtigung aus. Ältere Versionen der App lassen den Gelesen-Status
+beim Abgleich weg; deshalb sollten alle Geräte aktualisiert werden. Das Passwort wird auf Android
+verschlüsselt im Android Keystore abgelegt.
 
 ## Aufbau
 

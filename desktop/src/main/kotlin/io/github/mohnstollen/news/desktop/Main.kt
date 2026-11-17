@@ -19,12 +19,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyShortcut
 import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.ApplicationScope
-import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
@@ -35,6 +37,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import androidx.compose.foundation.isSystemInDarkTheme
+import io.github.mohnstollen.news.data.Theme
 import java.awt.SystemTray
 
 private enum class Screen { Main, Feeds, Settings }
@@ -115,33 +121,41 @@ private fun ApplicationScope.MainWindow(
         state = windowState,
         title = "News",
         icon = rememberVectorPainter(AppIcons.Logo),
-        onKeyEvent = { event -> screen == Screen.Main && handleMainKey(state, event) },
+        onKeyEvent = { event ->
+            val action = windowShortcut(event)
+            if (action == null || action == Shortcut.Back && screen == Screen.Main) {
+                screen == Screen.Main && handleMainKey(state, event)
+            } else {
+                when (action) {
+                    Shortcut.Close -> onClose()
+                    Shortcut.Quit -> onQuit()
+                    Shortcut.Settings -> screen = Screen.Settings
+                    Shortcut.Sidebar -> { screen = Screen.Main; sidebarVisible = !sidebarVisible }
+                    Shortcut.All -> { screen = Screen.Main; state.select(MainState.ListScope.All) }
+                    Shortcut.Starred -> { screen = Screen.Main; state.select(MainState.ListScope.Starred) }
+                    Shortcut.Back -> screen = Screen.Main
+                }
+                true
+            }
+        },
     ) {
         window.minimumSize = java.awt.Dimension(560, 480)
-        MenuBar {
-            Menu("Datei", mnemonic = 'D') {
-                Item("Jetzt aktualisieren", shortcut = KeyShortcut(Key.R, ctrl = true), onClick = state::refresh)
-                Item("Feeds verwalten", onClick = { screen = Screen.Feeds })
-                Item("Einstellungen", shortcut = KeyShortcut(Key.Comma, ctrl = true), onClick = { screen = Screen.Settings })
-                Separator()
-                Item("Fenster schließen", shortcut = KeyShortcut(Key.W, ctrl = true), onClick = onClose)
-                Item("Beenden", shortcut = KeyShortcut(Key.Q, ctrl = true), onClick = onQuit)
-            }
-            Menu("Ansicht", mnemonic = 'A') {
-                CheckboxItem("Feed-Leiste", checked = sidebarVisible, shortcut = KeyShortcut(Key.B, ctrl = true)) {
-                    sidebarVisible = it
-                }
-                Item("Suchen", shortcut = KeyShortcut(Key.F, ctrl = true), onClick = { screen = Screen.Main; state.openSearch() })
-                Item("Alle Artikel", shortcut = KeyShortcut(Key.One, ctrl = true)) {
-                    screen = Screen.Main; state.select(MainState.ListScope.All)
-                }
-                Item("Gemerkt", shortcut = KeyShortcut(Key.Two, ctrl = true)) {
-                    screen = Screen.Main; state.select(MainState.ListScope.Starred)
-                }
+
+        val prefs by container.settings.flow.collectAsState()
+        // The desktop setting can change while the app runs; look again now and then.
+        var systemDark by remember { mutableStateOf<Boolean?>(null) }
+        LaunchedEffect(prefs.theme) {
+            while (prefs.theme == Theme.SYSTEM) {
+                systemDark = withContext(Dispatchers.IO) { SystemTheme.isDark() }
+                delay(10_000)
             }
         }
-
-        NewsTheme {
+        val dark = when (prefs.theme) {
+            Theme.DARK -> true
+            Theme.LIGHT -> false
+            else -> systemDark ?: isSystemInDarkTheme()
+        }
+        NewsTheme(dark) {
             Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxSize()) {
                 val snackbar = remember { SnackbarHostState() }
                 LaunchedEffect(Unit) { state.messages.collect { scope.launch { snackbar.showSnackbar(it) } } }
@@ -162,5 +176,22 @@ private fun ApplicationScope.MainWindow(
                 }
             }
         }
+    }
+}
+
+private enum class Shortcut { Close, Quit, Settings, Sidebar, All, Starred, Back }
+
+/** Window-wide shortcuts. The app draws no menu bar, so that it can be dark like the rest of the window. */
+private fun windowShortcut(event: androidx.compose.ui.input.key.KeyEvent): Shortcut? {
+    if (event.type != KeyEventType.KeyDown) return null
+    if (!event.isCtrlPressed) return if (event.key == Key.Escape) Shortcut.Back else null
+    return when (event.key) {
+        Key.W -> Shortcut.Close
+        Key.Q -> Shortcut.Quit
+        Key.Comma -> Shortcut.Settings
+        Key.B -> Shortcut.Sidebar
+        Key.One -> Shortcut.All
+        Key.Two -> Shortcut.Starred
+        else -> null
     }
 }

@@ -41,6 +41,12 @@ class Repository(
 
     private val refreshMutex = Mutex()
 
+    /**
+     * Read markings from the last sync for articles that are not here yet (feed address to guid
+     * to marking, see [SyncState.reads]). Applied when the articles arrive with the next refresh.
+     */
+    private val pendingReads = java.util.concurrent.ConcurrentHashMap<Pair<String, String>, Long>()
+
     // ---- refresh ----------------------------------------------------------------------------
 
     suspend fun refreshAll(): RefreshResult = refresh(null)
@@ -114,6 +120,18 @@ class Repository(
         return db.withTransaction {
             val ids = articleDao.insertAll(articles)
 
+            // Articles that another device already marked read arrive as read, and are not "new".
+            val alreadyRead = mutableSetOf<Long>()
+            if (pendingReads.isNotEmpty()) {
+                articles.forEachIndexed { i, article ->
+                    val marked = pendingReads.remove(feed.url to article.guid) ?: return@forEachIndexed
+                    if (ids[i] != -1L && marked > 0) {
+                        articleDao.applySyncedRead(ids[i], true, marked, marked)
+                        alreadyRead += ids[i]
+                    }
+                }
+            }
+
             // Entries that came in through sync have no text yet.
             val missing = articleDao.guidsWithoutContent(feed.id).toSet()
             if (missing.isNotEmpty()) {
@@ -126,7 +144,7 @@ class Repository(
             if (retention > 0 && guids.size <= MAX_SQL_VARIABLES) {
                 articleDao.deleteOld(feed.id, now - retention * DAY_MS, guids)
             }
-            ids.filter { it != -1L }
+            ids.filter { it != -1L && it !in alreadyRead }
         }
     }
 
@@ -237,7 +255,8 @@ class Repository(
 
     suspend fun setRead(ids: List<Long>, read: Boolean) {
         val readAt = if (read) System.currentTimeMillis() else 0L
-        ids.chunked(MAX_SQL_VARIABLES).forEach { articleDao.setRead(it, read, readAt) }
+        val now = System.currentTimeMillis()
+        ids.chunked(MAX_SQL_VARIABLES).forEach { articleDao.setRead(it, read, readAt, now) }
     }
 
     suspend fun setStarred(id: Long, starred: Boolean) =
@@ -248,7 +267,7 @@ class Repository(
 
     // ---- sync -------------------------------------------------------------------------------
 
-    suspend fun exportSyncState(): SyncState {
+    suspend fun exportSyncState(includeReads: Boolean = true): SyncState {
         val feeds = feedDao.all().map {
             SyncFeed(it.url, it.title, it.siteUrl, it.category, it.fetchFullText, it.updatedAt)
         }
@@ -256,11 +275,18 @@ class Repository(
         val articles = articleDao.syncRows().map {
             SyncArticle(it.feedUrl, it.guid, it.title, it.link, it.pubDate, it.starred, it.note, it.stateUpdatedAt)
         }
-        return SyncState(feeds = feeds + tombstones, articles = articles)
+        val reads = if (!includeReads) emptyMap() else {
+            articleDao.readSyncRows(System.currentTimeMillis() - SyncMerge.READ_KEEP_MS)
+                .groupBy { it.feedUrl }
+                .mapValues { (_, rows) ->
+                    rows.associate { it.guid to if (it.read) it.readUpdatedAt else -it.readUpdatedAt }
+                }
+        }
+        return SyncState(feeds = feeds + tombstones, articles = articles, reads = reads)
     }
 
     /** Brings the local data in line with a merged state. Returns the number of feeds added. */
-    suspend fun applySyncState(state: SyncState): Int = db.withTransaction {
+    suspend fun applySyncState(state: SyncState, applyReads: Boolean = true): Int = db.withTransaction {
         var added = 0
         val now = System.currentTimeMillis()
         for (f in state.feeds) {
@@ -314,6 +340,22 @@ class Repository(
                 }
             } else if (a.updatedAt > local.stateUpdatedAt) {
                 articleDao.applySyncedState(local.id, a.starred, a.note, a.updatedAt)
+            }
+        }
+        if (applyReads) {
+            pendingReads.clear()
+            for ((feedUrl, entries) in state.reads) {
+                val feedId = feedIds[feedUrl] ?: continue
+                for ((guid, marked) in entries) {
+                    val local = articleDao.byGuid(feedId, guid)
+                    val changedAt = kotlin.math.abs(marked)
+                    when {
+                        local == null -> pendingReads[feedUrl to guid] = marked
+                        changedAt > local.readUpdatedAt -> articleDao.applySyncedRead(
+                            local.id, marked > 0, if (marked > 0) changedAt else 0L, changedAt,
+                        )
+                    }
+                }
             }
         }
         added

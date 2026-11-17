@@ -71,6 +71,7 @@ class MigrationTest {
             assertTrue(article.starred)
             assertTrue(article.read)
             assertEquals("read before this was recorded", 0L, article.readAt)
+            assertEquals("no read marking to sync yet", 0L, article.readUpdatedAt)
 
             // Existing articles are searchable, and so are later changes.
             suspend fun search(text: String) =

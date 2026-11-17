@@ -178,6 +178,14 @@ fun SettingsScreen(onBack: () -> Unit) {
                 enabled = prefs.syncConfigured,
                 onChange = { value -> settings.update { it.copy(ncAutoSync = value) } },
             )
+            SwitchRow(
+                title = "Gelesen-Status synchronisieren",
+                subtitle = "Gelesene Artikel der letzten drei Wochen gelten auf allen Geräten als gelesen. " +
+                    "Alle Geräte brauchen dafür die aktuelle Version der App.",
+                checked = prefs.ncSyncRead,
+                enabled = prefs.syncConfigured,
+                onChange = { value -> settings.update { it.copy(ncSyncRead = value) } },
+            )
             Spacer(Modifier.height(32.dp))
         }
     }
@@ -278,8 +286,8 @@ private fun NextcloudSection(
     val fieldModifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
 
     Text(
-        "Gleicht abonnierte Feeds, gemerkte Artikel und Notizen über eine Datei in deiner Nextcloud ab. " +
-            "Der Gelesen-Status wird nicht synchronisiert.",
+        "Gleicht abonnierte Feeds, gemerkte Artikel, Notizen und auf Wunsch den Gelesen-Status " +
+            "über eine Datei in deiner Nextcloud ab.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),

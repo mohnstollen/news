@@ -1,6 +1,11 @@
 package io.github.mohnstollen.news.desktop
 
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.DarkDefaultContextMenuRepresentation
+import androidx.compose.foundation.LightDefaultContextMenuRepresentation
+import androidx.compose.foundation.LocalContextMenuRepresentation
+import androidx.compose.foundation.LocalScrollbarStyle
+import androidx.compose.foundation.defaultScrollbarStyle
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -48,9 +53,59 @@ private val Dark = darkColorScheme(
     surfaceContainer = Color(0xFF271D1B),
 )
 
+/**
+ * Material colors plus the desktop-only parts that do not follow MaterialTheme by themselves:
+ * the right-click menus and the scroll bars.
+ */
 @Composable
-fun NewsTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) Dark else Light, content = content)
+fun NewsTheme(dark: Boolean, content: @Composable () -> Unit) {
+    val colors = if (dark) Dark else Light
+    MaterialTheme(colorScheme = colors) {
+        CompositionLocalProvider(
+            LocalContextMenuRepresentation provides
+                if (dark) DarkDefaultContextMenuRepresentation else LightDefaultContextMenuRepresentation,
+            LocalScrollbarStyle provides defaultScrollbarStyle().copy(
+                unhoverColor = colors.onSurface.copy(alpha = 0.2f),
+                hoverColor = colors.onSurface.copy(alpha = 0.45f),
+            ),
+            content = content,
+        )
+    }
+}
+
+/**
+ * Whether the desktop uses a dark appearance. Compose cannot tell on most Linux desktops, so this
+ * asks the desktop settings: the GNOME/Cinnamon color scheme, the GTK theme (GNOME, Xfce, MATE,
+ * Cinnamon) and the KDE color scheme. A theme counts as dark if its name says so.
+ */
+object SystemTheme {
+    private fun run(vararg command: String): String? = runCatching {
+        val proc = ProcessBuilder(*command).redirectError(ProcessBuilder.Redirect.DISCARD).start()
+        val out = proc.inputStream.readAllBytes().toString(Charsets.UTF_8)
+        if (proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS) && proc.exitValue() == 0) out.trim() else null
+    }.getOrNull()
+
+    private fun kdeColorScheme(): String? {
+        val config = System.getenv("XDG_CONFIG_HOME")?.takeIf { it.isNotBlank() } ?: (System.getProperty("user.home") + "/.config")
+        val file = java.io.File(config, "kdeglobals")
+        if (!file.exists()) return null
+        return runCatching { file.readLines().firstOrNull { it.startsWith("ColorScheme=") }?.substringAfter('=') }.getOrNull()
+    }
+
+    /** null if nothing could be found out. Blocking; call off the UI thread. */
+    fun isDark(): Boolean? {
+        val desktop = System.getenv("XDG_CURRENT_DESKTOP").orEmpty().uppercase()
+        val hints = buildList {
+            System.getenv("GTK_THEME")?.let(::add)
+            if ("KDE" in desktop) kdeColorScheme()?.let(::add)
+            if ("XFCE" in desktop) run("xfconf-query", "-c", "xsettings", "-p", "/Net/ThemeName")?.let(::add)
+            if ("MATE" in desktop) run("gsettings", "get", "org.mate.interface", "gtk-theme")?.let(::add)
+            run("gsettings", "get", "org.gnome.desktop.interface", "color-scheme")?.let(::add)
+            run("gsettings", "get", "org.gnome.desktop.interface", "gtk-theme")?.let(::add)
+        }
+        if (hints.isEmpty()) return null
+        return hints.any { it.contains("dark", ignoreCase = true) }
+    }
 }
 
 /** "vor 5 Minuten", like Android's DateUtils.getRelativeTimeSpanString. */

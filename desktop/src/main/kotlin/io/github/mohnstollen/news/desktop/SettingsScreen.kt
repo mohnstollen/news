@@ -46,6 +46,7 @@ import io.github.mohnstollen.news.data.DEFAULT_INTERVAL_MINUTES
 import io.github.mohnstollen.news.data.MIN_INTERVAL_MINUTES
 import io.github.mohnstollen.news.data.Prefs
 import io.github.mohnstollen.news.data.ReadVisibility
+import io.github.mohnstollen.news.data.Theme
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -117,6 +118,9 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                 )
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                SectionTitle("Darstellung")
+                ThemeField(prefs.theme) { value -> settings.update { it.copy(theme = value) } }
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 SectionTitle("Lesen")
                 SwitchRow(
                     title = "Beim Scrollen als gelesen markieren",
@@ -161,7 +165,50 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                     enabled = prefs.syncConfigured,
                     onChange = { value -> settings.update { it.copy(ncAutoSync = value) } },
                 )
+                SwitchRow(
+                    title = "Gelesen-Status synchronisieren",
+                    subtitle = "Gelesene Artikel der letzten drei Wochen gelten auf allen Geräten als gelesen. " +
+                        "Alle Geräte brauchen dafür die aktuelle Version der App.",
+                    checked = prefs.ncSyncRead,
+                    enabled = prefs.syncConfigured,
+                    onChange = { value -> settings.update { it.copy(ncSyncRead = value) } },
+                )
                 Spacer(Modifier.height(32.dp))
+            }
+        }
+    }
+}
+
+private val themeOptions = listOf(
+    Theme.SYSTEM to "Wie das System",
+    Theme.LIGHT to "Hell",
+    Theme.DARK to "Dunkel",
+)
+
+/** Light, dark, or whatever the desktop uses. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ThemeField(theme: String, onChange: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        OutlinedTextField(
+            value = themeOptions.firstOrNull { it.first == theme }?.second.orEmpty(),
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Design") },
+            supportingText = {
+                Text("„Wie das System“ folgt dem hellen oder dunklen Design des Desktops (GTK-, KDE- oder GNOME-Einstellung).")
+            },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            themeOptions.forEach { (value, text) ->
+                DropdownMenuItem(text = { Text(text) }, onClick = { onChange(value); expanded = false })
             }
         }
     }
@@ -225,8 +272,8 @@ private fun NextcloudSection(
     val fieldModifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
 
     Text(
-        "Gleicht abonnierte Feeds, gemerkte Artikel und Notizen über eine Datei in deiner Nextcloud ab. " +
-            "Der Gelesen-Status wird nicht synchronisiert.",
+        "Gleicht abonnierte Feeds, gemerkte Artikel, Notizen und auf Wunsch den Gelesen-Status " +
+            "über eine Datei in deiner Nextcloud ab.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),

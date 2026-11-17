@@ -34,6 +34,8 @@ data class Prefs(
     val ncUser: String = "",
     val ncFolder: String = "News",
     val ncAutoSync: Boolean = true,
+    /** Also sync which articles are read. */
+    val ncSyncRead: Boolean = true,
     val lastSync: Long = 0,
     val lastSyncError: String? = null,
 ) {
@@ -66,6 +68,7 @@ class SettingsStore(context: Context) {
             ncUser = sp.getString("ncUser", d.ncUser)!!,
             ncFolder = sp.getString("ncFolder", d.ncFolder)!!,
             ncAutoSync = sp.getBoolean("ncAutoSync", d.ncAutoSync),
+            ncSyncRead = sp.getBoolean("ncSyncRead", d.ncSyncRead),
             lastSync = sp.getLong("lastSync", d.lastSync),
             lastSyncError = sp.getString("lastSyncError", d.lastSyncError),
         )
@@ -89,6 +92,7 @@ class SettingsStore(context: Context) {
             .putString("ncUser", p.ncUser)
             .putString("ncFolder", p.ncFolder)
             .putBoolean("ncAutoSync", p.ncAutoSync)
+            .putBoolean("ncSyncRead", p.ncSyncRead)
             .putLong("lastSync", p.lastSync)
             .putString("lastSyncError", p.lastSyncError)
             .apply()
