@@ -38,7 +38,12 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 /** Plain application, so the tests do not start the real app's background scheduling. */
-class TestApp : android.app.Application()
+class TestApp : android.app.Application() {
+    override fun onCreate() {
+        FakeAndroidKeyStore.install()
+        super.onCreate()
+    }
+}
 
 @RunWith(AndroidJUnit4::class)
 @Config(application = TestApp::class, sdk = [34])
@@ -52,6 +57,9 @@ class RepositoryTest {
     private val dav = ConcurrentHashMap<String, String>()
     private val davFolders = ConcurrentHashMap.newKeySet<String>()
     private var davStatus = 0
+    /** User id the fake Nextcloud reports; null: no such endpoint (404). */
+    private var ocsUserId: String? = null
+    private val ocsRequests = java.util.concurrent.atomic.AtomicInteger()
 
     private lateinit var settings: SettingsStore
     private val databases = mutableListOf<AppDatabase>()
@@ -69,6 +77,16 @@ class RepositoryTest {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.requestUrl!!.encodedPath
+                if (path == "/ocs/v2.php/cloud/user") {
+                    ocsRequests.incrementAndGet()
+                    val id = ocsUserId ?: return MockResponse().setResponseCode(404)
+                    if (request.getHeader("OCS-APIRequest") != "true") return MockResponse().setResponseCode(400)
+                    if (request.getHeader("Authorization") != okhttp3.Credentials.basic("erika@example.org", "app-passwort")) {
+                        return MockResponse().setResponseCode(401)
+                    }
+                    return MockResponse().setHeader("Content-Type", "application/json")
+                        .setBody("{\"ocs\":{\"meta\":{\"status\":\"ok\"},\"data\":{\"id\":\"$id\",\"display-name\":\"Erika\"}}}")
+                }
                 if (!path.startsWith("/remote.php/")) {
                     val page = pages[path] ?: return MockResponse().setResponseCode(404)
                     val etag = page.headers["ETag"]
@@ -356,6 +374,41 @@ class RepositoryTest {
         a.sync.sync()
         assertEquals(1, b.sync.sync())
         assertEquals(2, b.repo.feedDao.all().size)
+    }
+
+    @Test
+    fun syncUsesTheNextcloudUserIdForTheWebDavPath() = runBlocking {
+        // Logged in with an e-mail address, as after scanning a login QR code; the files live under the user id.
+        val credentials = io.github.mohnstollen.news.data.NcLogin.parse(
+            "nc://login/user:erika%40example.org&password:app-passwort&server:" +
+                java.net.URLEncoder.encode(url("/").trimEnd('/'), "UTF-8"),
+        )!!
+        settings.ncPassword = credentials.password
+        assertEquals("the password is stored and read back", "app-passwort", settings.ncPassword)
+        settings.update { it.copy(ncServer = credentials.server, ncUser = credentials.user, ncFolder = "News") }
+        ocsUserId = "erika-id"
+
+        val a = device()
+        a.sync.sync()
+        assertTrue(dav.keys.toString(), "/remote.php/dav/files/erika-id/News/news-sync.json" in dav.keys)
+        assertEquals("erika-id", settings.current.ncDavUser)
+
+        // Remembered: no second lookup.
+        a.sync.sync()
+        assertEquals(1, ocsRequests.get())
+
+        // A different login is looked up again; without the endpoint, the login name is used.
+        ocsUserId = null
+        settings.update { it.copy(ncUser = "erika") }
+        a.sync.sync()
+        assertEquals(2, ocsRequests.get())
+        assertTrue("/remote.php/dav/files/erika/News/news-sync.json" in dav.keys)
+
+        // An address that already points into WebDAV is used as it is, without a lookup.
+        settings.update { it.copy(ncServer = url("/remote.php/dav/files/direkt/"), ncDavUser = "", ncDavUserFor = "") }
+        a.sync.sync()
+        assertEquals(2, ocsRequests.get())
+        assertTrue("/remote.php/dav/files/direkt/News/news-sync.json" in dav.keys)
     }
 
     @Test

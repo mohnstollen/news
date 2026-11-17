@@ -41,8 +41,18 @@ Die APK liegt danach unter `app/build/outputs/apk/debug/app-debug.apk`.
 
 ## Nextcloud-Synchronisation
 
-In den Einstellungen Server-Adresse, Benutzername und ein App-Passwort eintragen. Die App legt
-im gewählten Ordner zwei Dateien an:
+Am einfachsten: In Nextcloud unter **Persönliche Einstellungen → Sicherheit** ein App-Passwort
+erstellen und **„QR-Code für mobile Apps anzeigen“**. In der App unter **Einstellungen →
+Nextcloud-Synchronisation → „Mit QR-Code anmelden“** den Code scannen; Server, Benutzer und
+Passwort werden übernommen und gleich synchronisiert. Der Text des QR-Codes (`nc://login/…`)
+lässt sich alternativ ins Feld „Server-Adresse“ einfügen. Von Hand geht es mit Server-Adresse,
+Benutzername und App-Passwort.
+
+Die Kamera wird nur für den Scan gebraucht (CameraX und ZXing, ohne Google-Dienste). Meldet man
+sich mit einer E-Mail-Adresse an, ermittelt die App beim ersten Sync die Nextcloud-Benutzer-ID
+für den WebDAV-Pfad.
+
+Die App legt im gewählten Ordner zwei Dateien an:
 
 - `news-sync.json`: Feeds (inklusive gelöschter, damit sie nicht zurückkommen), gemerkte
   Artikel und Notizen. Bei Konflikten gewinnt pro Feed bzw. Artikel die jüngste Änderung.
@@ -60,8 +70,10 @@ Keystore abgelegt.
 | `data/Network.kt` | Abruf, Feed-Suche auf Webseiten, Volltext-Extraktion |
 | `data/Opml.kt` | OPML lesen und schreiben |
 | `data/Sync.kt` | WebDAV-Client und Abgleich |
+| `data/NextcloudLogin.kt` | Anmelde-QR-Code lesen und dekodieren |
 | `data/Repository.kt` | Aktualisieren, Abonnements, Artikelstatus |
 | `work/RefreshWorker.kt` | Hintergrund-Aktualisierung mit WorkManager |
 | `work/Notifier.kt` | Benachrichtigung über neue Artikel |
 | `widget/NewsWidget.kt` | Startbildschirm-Widget |
+| `ui/QrScanner.kt` | Kamera-Ansicht für den QR-Code |
 | `ui/` | Oberfläche: Artikelliste, Leseansicht, Feeds, Einstellungen |

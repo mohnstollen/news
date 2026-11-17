@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.performTextInput
@@ -40,6 +41,7 @@ import org.robolectric.annotation.GraphicsMode
 class UiTestApp : NewsApp() {
     override fun onCreate() {
         WorkManagerTestInitHelper.initializeTestWorkManager(this, Configuration.Builder().build())
+        FakeAndroidKeyStore.install()
         super.onCreate()
     }
 }
@@ -236,6 +238,52 @@ class HideReadUiTest : UiTestBase() {
         compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
         compose.onNodeWithText("Einstellungen").performClick()
         waitFor("Gelesene Artikel ausblenden")
+    }
+}
+
+class QrLoginUiTest : UiTestBase() {
+    @Test(timeout = 120000)
+    fun pastedLoginCodeFillsInAndSyncs() {
+        val server = okhttp3.mockwebserver.MockWebServer()
+        val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): okhttp3.mockwebserver.MockResponse {
+                val auth = request.getHeader("Authorization")
+                requests += "${request.method} ${request.requestUrl!!.encodedPath} ${auth == okhttp3.Credentials.basic("erika@example.org", "AbCdE-fGhIj")}"
+                if (auth != okhttp3.Credentials.basic("erika@example.org", "AbCdE-fGhIj")) {
+                    return okhttp3.mockwebserver.MockResponse().setResponseCode(401)
+                }
+                return when {
+                    request.requestUrl!!.encodedPath == "/ocs/v2.php/cloud/user" ->
+                        okhttp3.mockwebserver.MockResponse().setBody("{\"ocs\":{\"data\":{\"id\":\"erika\"}}}")
+                    request.method == "GET" -> okhttp3.mockwebserver.MockResponse().setResponseCode(404)
+                    else -> okhttp3.mockwebserver.MockResponse().setResponseCode(201)
+                }
+            }
+        }
+        server.start()
+        try {
+            waitFor("Artikel Nummer 1")
+            compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
+            compose.onNodeWithText("Einstellungen").performClick()
+            waitFor("Mit QR-Code anmelden")
+
+            val address = java.net.URLEncoder.encode(server.url("/").toString().trimEnd('/'), "UTF-8")
+            compose.onNodeWithText("Server-Adresse").performScrollTo()
+                .performTextInput("nc://login/user:erika%40example.org&password:AbCdE-fGhIj&server:$address")
+
+            waitFor("Synchronisiert.")
+            val settings = context.container.settings
+            assertEquals(server.url("/").toString().trimEnd('/'), settings.current.ncServer)
+            assertEquals("erika@example.org", settings.current.ncUser)
+            assertEquals("AbCdE-fGhIj", settings.ncPassword)
+            // The fields show the data, not the pasted code.
+            compose.onNodeWithText("erika@example.org").assertExists()
+            assertTrue(requests.toString(), "PUT /remote.php/dav/files/erika/News/news-sync.json true" in requests)
+            assertTrue(requests.toString(), requests.all { it.endsWith("true") })
+        } finally {
+            server.shutdown()
+        }
     }
 }
 

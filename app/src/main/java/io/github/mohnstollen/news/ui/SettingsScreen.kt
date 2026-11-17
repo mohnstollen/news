@@ -30,6 +30,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -55,6 +56,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.mohnstollen.news.data.DEFAULT_INTERVAL_MINUTES
 import io.github.mohnstollen.news.data.MIN_INTERVAL_MINUTES
+import io.github.mohnstollen.news.data.NcCredentials
+import io.github.mohnstollen.news.data.NcLogin
 import io.github.mohnstollen.news.data.Prefs
 import io.github.mohnstollen.news.data.ReadVisibility
 import io.github.mohnstollen.news.work.RefreshWorker
@@ -274,8 +277,38 @@ private fun NextcloudSection(
     var folder by rememberSaveable { mutableStateOf(prefs.ncFolder) }
     var busy by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) }
+    var scanning by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val fieldModifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+
+    fun saveAndSync() {
+        onSave(server, user, password, folder)
+        busy = true
+        result = null
+        scope.launch {
+            result = try {
+                when (val added = onSync()) {
+                    0 -> "Synchronisiert."
+                    1 -> "Synchronisiert, 1 Feed hinzugefügt."
+                    else -> "Synchronisiert, $added Feeds hinzugefügt."
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                e.message ?: e.javaClass.simpleName
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    /** Login data from a QR code (scanned or pasted): fill in, save and sync right away. */
+    fun apply(credentials: NcCredentials) {
+        server = credentials.server
+        user = credentials.user
+        password = credentials.password
+        saveAndSync()
+    }
 
     Text(
         "Gleicht abonnierte Feeds, gemerkte Artikel und Notizen über eine Datei in deiner Nextcloud ab. " +
@@ -284,9 +317,32 @@ private fun NextcloudSection(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
     )
+    OutlinedButton(
+        onClick = { scanning = true },
+        enabled = !busy,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        Icon(AppIcons.QrCode, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.size(8.dp))
+        Text("Mit QR-Code anmelden")
+    }
+    Text(
+        "In Nextcloud unter Persönliche Einstellungen → Sicherheit ein App-Passwort erstellen und den " +
+            "QR-Code anzeigen lassen. Oder die Daten unten von Hand eintragen.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+    )
+    if (scanning) {
+        QrLoginScanner(
+            onScanned = { scanning = false; apply(it) },
+            onDismiss = { scanning = false },
+        )
+    }
     OutlinedTextField(
         value = server,
-        onValueChange = { server = it },
+        // The text of a login QR code pasted here is taken over directly.
+        onValueChange = { text -> NcLogin.parse(text)?.let(::apply) ?: run { server = text } },
         label = { Text("Server-Adresse") },
         placeholder = { Text("https://cloud.beispiel.de") },
         singleLine = true,
@@ -304,7 +360,7 @@ private fun NextcloudSection(
         value = password,
         onValueChange = { password = it },
         label = { Text("App-Passwort") },
-        supportingText = { Text("In Nextcloud unter Einstellungen → Sicherheit → Geräte & Sitzungen erstellen.") },
+        supportingText = { Text("Nicht das normale Passwort: In Nextcloud unter Persönliche Einstellungen → Sicherheit erstellen.") },
         singleLine = true,
         visualTransformation = PasswordVisualTransformation(),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -331,27 +387,7 @@ private fun NextcloudSection(
     ) {
         Button(
             enabled = !busy && server.isNotBlank() && user.isNotBlank() && password.isNotEmpty(),
-            onClick = {
-                onSave(server, user, password, folder)
-                busy = true
-                result = null
-                scope.launch {
-                    result = try {
-                        val added = onSync()
-                        when (added) {
-                            0 -> "Synchronisiert."
-                            1 -> "Synchronisiert, 1 Feed hinzugefügt."
-                            else -> "Synchronisiert, $added Feeds hinzugefügt."
-                        }
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        e.message ?: e.javaClass.simpleName
-                    } finally {
-                        busy = false
-                    }
-                }
-            },
+            onClick = ::saveAndSync,
         ) { Text("Speichern & jetzt synchronisieren") }
         if (busy) {
             Spacer(Modifier.size(12.dp))
