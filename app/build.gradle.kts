@@ -18,6 +18,17 @@ android {
         versionName = "1.5"
     }
 
+    signingConfigs {
+        // A fixed debug key, so that every CI build installs as an update over the previous one.
+        // Only for builds from this repository; it protects nothing.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
