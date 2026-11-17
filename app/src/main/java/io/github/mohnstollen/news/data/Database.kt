@@ -14,8 +14,6 @@ import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.RoomDatabase
-import androidx.room.migration.Migration
-import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "feeds", indices = [Index(value = ["url"], unique = true)])
@@ -298,30 +296,6 @@ interface ArticleDao {
 abstract class AppDatabase : RoomDatabase() {
     abstract fun feedDao(): FeedDao
     abstract fun articleDao(): ArticleDao
-
-    companion object {
-        /** Adds the per-feed notification switch and the search index. */
-        val MIGRATION_1_2 = object : Migration(1, 2) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE feeds ADD COLUMN notify INTEGER NOT NULL DEFAULT 1")
-                db.execSQL(
-                    "CREATE VIRTUAL TABLE IF NOT EXISTS `articles_fts` USING FTS4(`title` TEXT NOT NULL, " +
-                        "`summary` TEXT NOT NULL, `content` TEXT, `fullText` TEXT, `note` TEXT, " +
-                        "tokenize=unicode61, content=`articles`)",
-                )
-                db.execSQL("INSERT INTO articles_fts(articles_fts) VALUES('rebuild')")
-            }
-        }
-
-        /** Records when an article was read. Articles read before count as read long ago. */
-        val MIGRATION_2_3 = object : Migration(2, 3) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE articles ADD COLUMN readAt INTEGER NOT NULL DEFAULT 0")
-            }
-        }
-
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
-    }
 }
 
 /** Whether a list still shows an article, given the "hide read articles" setting. */

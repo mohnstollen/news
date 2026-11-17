@@ -6,6 +6,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.mohnstollen.news.data.AppDatabase
+import io.github.mohnstollen.news.data.Migrations
 import io.github.mohnstollen.news.data.SearchQuery
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -59,7 +60,7 @@ class MigrationTest {
 
         // Room checks the migrated schema against the current entities when it opens the file.
         val db = Room.databaseBuilder(context, AppDatabase::class.java, "migration.db")
-            .addMigrations(*AppDatabase.MIGRATIONS).build()
+            .addMigrations(*Migrations.ALL).build()
         try {
             val feed = db.feedDao().all().single()
             assertEquals("Alt", feed.title)
