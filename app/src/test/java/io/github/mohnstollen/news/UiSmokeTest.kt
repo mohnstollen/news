@@ -7,6 +7,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -59,8 +60,18 @@ abstract class UiTestBase {
     protected val context: Context = ApplicationProvider.getApplicationContext()
     protected val repo get() = context.container.repository
 
+    /**
+     * Robolectric answers bindService with a connection that has no component name, which the
+     * player connection cannot handle. By default the playback service is unreachable.
+     */
+    protected open fun setUpPlaybackService() {
+        val name = android.content.ComponentName(context, io.github.mohnstollen.news.playback.PlaybackService::class.java)
+        org.robolectric.Shadows.shadowOf(context as android.app.Application).declareComponentUnbindable(name)
+    }
+
     private val seed = object : ExternalResource() {
         override fun before() = runBlocking {
+            setUpPlaybackService()
             val now = System.currentTimeMillis()
             val feedId = repo.feedDao.insert(Feed(url = "https://example.org/feed", title = "Beispielfeed", updatedAt = now))
             repo.articleDao.insertAll(
@@ -441,3 +452,90 @@ class UiSmokeTest : UiTestBase() {
 
 private fun androidx.compose.ui.test.junit4.ComposeTestRule.onAllNodesWithContentDescriptionCompat(label: String) =
     onAllNodes(androidx.compose.ui.test.hasContentDescription(label))
+
+class EpisodeUiTest : UiTestBase() {
+    private val server = okhttp3.mockwebserver.MockWebServer()
+    private lateinit var service: io.github.mohnstollen.news.playback.PlaybackService
+
+    /** Like waitUntil, but gives the player's threads real time between checks. */
+    private fun eventually(what: String, millis: Long = 10_000, done: () -> Boolean) {
+        val end = System.currentTimeMillis() + millis
+        while (true) {
+            compose.waitForIdle()
+            if (done()) return
+            // The player's own threads schedule by the clock, which Robolectric only moves on request.
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(100))
+            if (System.currentTimeMillis() > end) throw AssertionError("timed out waiting for $what")
+            Thread.sleep(50)
+        }
+    }
+
+    /** The real service, reached through its binder as on a device. */
+    override fun setUpPlaybackService() {
+        val name = android.content.ComponentName(context, io.github.mohnstollen.news.playback.PlaybackService::class.java)
+        service = org.robolectric.Robolectric.buildService(io.github.mohnstollen.news.playback.PlaybackService::class.java)
+            .create().get()
+        val binder = service.onBind(
+            android.content.Intent(androidx.media3.session.MediaSessionService.SERVICE_INTERFACE).setComponent(name),
+        )
+        org.robolectric.Shadows.shadowOf(context as android.app.Application).setComponentNameAndServiceForBindService(name, binder)
+    }
+
+    @Test(timeout = 120000)
+    fun episodesPlayFromTheListAndCanBeMarkedPlayed() {
+        // The audio address answers 404, so the player has to report a problem.
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest) =
+                okhttp3.mockwebserver.MockResponse().setResponseCode(404)
+        }
+        server.start()
+        val id = runBlocking {
+            val feedId = repo.feedDao.all().first().id
+            repo.articleDao.insertAll(
+                listOf(
+                    Article(
+                        feedId = feedId, guid = "ep1", title = "Folge Eins", summary = "Shownotes",
+                        content = "<p>Shownotes</p>", pubDate = System.currentTimeMillis(), fetchedAt = 0,
+                        enclosureUrl = server.url("/ep1.mp3").toString(), enclosureType = "audio/mpeg",
+                        durationSeconds = 1800,
+                    ),
+                ),
+            ).single()
+        }
+        waitFor("Folge Eins")
+        compose.onNodeWithText("30 Min").assertIsDisplayed()
+
+        try {
+            compose.onAllNodesWithContentDescription("Abspielen")[0].performClick()
+            eventually("episode loaded") { service.sessions.single().player.currentMediaItem?.mediaId == id.toString() }
+            // The mini player shows the episode, then the failed download.
+            eventually("mini player") { compose.onAllNodesWithText("Folge Eins").fetchSemanticsNodes().size == 2 }
+            eventually("error", 20_000) {
+                compose.onAllNodesWithText("Die Audiodatei ist nicht (mehr) abrufbar").fetchSemanticsNodes().isNotEmpty()
+            }
+
+            // Full player: speed is remembered, "Beenden" unloads the episode.
+            compose.onNodeWithContentDescription("10 Sekunden zurück").assertIsDisplayed()
+            compose.onNode(hasClickAction() and hasText("Die Audiodatei ist nicht (mehr) abrufbar"), useUnmergedTree = false)
+                .performClick()
+            waitFor("Geschwindigkeit")
+            compose.onNodeWithText("1,5×").performClick()
+            eventually("speed") { context.container.settings.current.playbackSpeed == 1.5f }
+            compose.onNodeWithText("Beenden").performClick()
+            eventually("mini player gone") { compose.onAllNodesWithText("Folge Eins").fetchSemanticsNodes().size == 1 }
+
+            // In the reader: mark as played, which also counts as read.
+            compose.onNodeWithText("Folge Eins").performClick()
+            waitFor("Abspielen")
+            compose.onNodeWithContentDescription("Als gehört markieren").performClick()
+            compose.waitUntil(5_000) { runBlocking { repo.articleDao.byId(id)!!.playedAt } > 0 }
+            assertTrue(runBlocking { repo.articleDao.byId(id)!!.read })
+            compose.onNodeWithContentDescription("Als nicht gehört markieren").assertIsDisplayed()
+            compose.onNodeWithContentDescription("Zurück").performClick()
+            waitFor("Gehört")
+        } finally {
+            service.onDestroy()
+            server.shutdown()
+        }
+    }
+}

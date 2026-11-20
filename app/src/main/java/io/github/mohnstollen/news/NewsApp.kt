@@ -13,7 +13,7 @@ import io.github.mohnstollen.news.data.newHttpClient
 import io.github.mohnstollen.news.work.RefreshWorker
 
 class AppContainer(app: Application) {
-    private val http = newHttpClient()
+    val http = newHttpClient()
     private val db = Room.databaseBuilder(app, AppDatabase::class.java, "news.db")
         .addMigrations(*AppDatabase.MIGRATIONS)
         .build()

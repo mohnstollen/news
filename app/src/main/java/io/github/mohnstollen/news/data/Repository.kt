@@ -259,6 +259,18 @@ class Repository(
         ids.chunked(MAX_SQL_VARIABLES).forEach { articleDao.setRead(it, read, readAt) }
     }
 
+    /** Remembers where playback of an episode stopped. */
+    suspend fun savePlayPosition(id: Long, positionMs: Long) = articleDao.setPlayPosition(id, positionMs)
+
+    /** Played to the end counts as read; marking as not played leaves the read state alone. */
+    suspend fun setPlayed(id: Long, played: Boolean) {
+        val now = System.currentTimeMillis()
+        db.withTransaction {
+            articleDao.setPlayed(id, if (played) now else 0)
+            if (played) articleDao.markReadIfUnread(id, now)
+        }
+    }
+
     suspend fun setStarred(id: Long, starred: Boolean) =
         articleDao.setStarred(id, starred, System.currentTimeMillis())
 

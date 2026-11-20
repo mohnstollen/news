@@ -267,10 +267,27 @@ class RepositoryTest {
         assertEquals("the position survives the update", 61_000L, episode.playPosition)
         assertEquals(url("/cover.jpg"), d.repo.feedDao.byId(feed.id)!!.imageUrl)
 
-        d.repo.articleDao.setPlayed(id, 5_000)
+        d.repo.articleDao.observeList(null, false).first().single().let {
+            assertTrue("the list knows it is an episode", it.hasAudio)
+            assertEquals(1800L, it.durationSeconds)
+            assertEquals(61_000L, it.playPosition)
+        }
+
+        // Played to the end: counts as read, the read time of an already read episode stays.
+        d.repo.setPlayed(id, true)
         d.repo.articleDao.byId(id)!!.let {
-            assertEquals(5_000L, it.playedAt)
+            assertTrue(it.playedAt > 0)
+            assertTrue(it.read)
             assertEquals("played to the end starts over", 0L, it.playPosition)
+        }
+        d.repo.articleDao.setRead(listOf(id), true, 1234)
+        d.repo.setPlayed(id, false)
+        d.repo.setPlayed(id, true)
+        assertEquals(1234L, d.repo.articleDao.byId(id)!!.readAt)
+        d.repo.setPlayed(id, false)
+        d.repo.articleDao.byId(id)!!.let {
+            assertEquals(0L, it.playedAt)
+            assertTrue("not played does not mean unread", it.read)
         }
 
         // A downloaded episode is not cleaned up while its file exists.

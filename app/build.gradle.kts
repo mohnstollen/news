@@ -72,7 +72,13 @@ dependencies {
     // Login Flow v2: the Nextcloud login page as a Custom Tab on top of the app
     implementation("androidx.browser:browser:1.8.0")
 
+    // Podcast playback: player, media session (notification, lock screen, headset) and OkHttp streaming
+    implementation("androidx.media3:media3-exoplayer:1.5.1")
+    implementation("androidx.media3:media3-session:1.5.1")
+    implementation("androidx.media3:media3-datasource-okhttp:1.5.1")
+
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

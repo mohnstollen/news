@@ -9,6 +9,10 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -38,6 +42,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -51,6 +56,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.mohnstollen.news.data.Article
 import io.github.mohnstollen.news.data.Feed
+import io.github.mohnstollen.news.playback.Episodes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -93,6 +99,11 @@ class ReaderViewModel(app: Application, handle: SavedStateHandle) : AndroidViewM
         viewModelScope.launch { repo.setNote(id, text) }
     }
 
+    fun togglePlayed() {
+        val a = article.value ?: return
+        viewModelScope.launch { repo.setPlayed(id, a.playedAt == 0L) }
+    }
+
     fun markUnread(then: () -> Unit) {
         viewModelScope.launch {
             repo.setRead(listOf(id), false)
@@ -121,7 +132,7 @@ class ReaderViewModel(app: Application, handle: SavedStateHandle) : AndroidViewM
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReaderScreen(onBack: () -> Unit, vm: ReaderViewModel = viewModel()) {
+fun ReaderScreen(onBack: () -> Unit, onOpenArticle: (Long) -> Unit, vm: ReaderViewModel = viewModel()) {
     val article by vm.article.collectAsStateWithLifecycle()
     val feed by vm.feed.collectAsStateWithLifecycle()
     val loading by vm.loadingFullText.collectAsStateWithLifecycle()
@@ -135,6 +146,7 @@ fun ReaderScreen(onBack: () -> Unit, vm: ReaderViewModel = viewModel()) {
     val a = article
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
+        bottomBar = { MiniPlayer(onOpenArticle = { if (it != a?.id) onOpenArticle(it) }) },
         topBar = {
             TopAppBar(
                 title = {},
@@ -200,7 +212,9 @@ fun ReaderScreen(onBack: () -> Unit, vm: ReaderViewModel = viewModel()) {
             )
         },
     ) { padding ->
-        Box(Modifier.padding(padding).fillMaxSize()) {
+        Column(Modifier.padding(padding).fillMaxSize()) {
+          if (a?.enclosureUrl != null) EpisodePanel(a, onTogglePlayed = vm::togglePlayed)
+          Box(Modifier.weight(1f).fillMaxWidth()) {
             if (a != null) {
                 val colors = MaterialTheme.colorScheme
                 val body = (if (preferFullText) a.fullText else null) ?: a.content
@@ -219,6 +233,7 @@ fun ReaderScreen(onBack: () -> Unit, vm: ReaderViewModel = viewModel()) {
                 ArticleWebView(html = html, baseUrl = a.link, modifier = Modifier.fillMaxSize())
             }
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+          }
         }
     }
 
@@ -228,6 +243,42 @@ fun ReaderScreen(onBack: () -> Unit, vm: ReaderViewModel = viewModel()) {
             onSave = { vm.saveNote(it); noteOpen = false },
             onDismiss = { noteOpen = false },
         )
+    }
+}
+
+/** Play button and progress of a podcast episode, above its show notes. */
+@Composable
+private fun EpisodePanel(a: Article, onTogglePlayed: () -> Unit) {
+    val state = playerState()
+    // While this episode is loaded, the player knows better than the stored position.
+    val live = state.articleId == a.id && state.durationMs > 0
+    val label = if (live) {
+        Episodes.clock(state.positionMs) + " / " + Episodes.clock(state.durationMs)
+    } else {
+        Episodes.label(a.durationSeconds, a.playPosition, a.playedAt)
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 8.dp),
+    ) {
+        EpisodePlayButton(a.id, size = 48.dp)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = if (state.isPlaying(a.id)) "Läuft" else if (a.playPosition > 0 && a.playedAt == 0L) "Weiterhören" else "Abspielen",
+                style = MaterialTheme.typography.titleSmall,
+            )
+            if (label != null) {
+                Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        IconButton(onClick = onTogglePlayed) {
+            Icon(
+                AppIcons.Played,
+                contentDescription = if (a.playedAt > 0) "Als nicht gehört markieren" else "Als gehört markieren",
+                tint = if (a.playedAt > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

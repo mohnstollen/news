@@ -17,6 +17,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.SolidColor
@@ -33,6 +34,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import io.github.mohnstollen.news.AppContainer
 import io.github.mohnstollen.news.NewsApp
+import io.github.mohnstollen.news.playback.PlayerConnection
 import io.github.mohnstollen.news.widget.NewsWidget
 import io.github.mohnstollen.news.work.Notifier
 import kotlinx.coroutines.launch
@@ -40,6 +42,14 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     /** Article to open, as requested by a tap on the notification. */
     private val requestedArticle = mutableStateOf<Long?>(null)
+
+    /** Connected while the app is visible, so the screens can show and steer playback. */
+    private val player by lazy { PlayerConnection(this) }
+
+    override fun onStart() {
+        super.onStart()
+        player.connect()
+    }
 
     private fun readIntent(intent: Intent?) {
         val id = intent?.getLongExtra(Notifier.EXTRA_ARTICLE_ID, -1L) ?: -1L
@@ -58,6 +68,7 @@ class MainActivity : ComponentActivity() {
     /** Reading changes what the widget should list. */
     override fun onStop() {
         super.onStop()
+        player.release()
         val app = applicationContext
         container.repository.scope.launch { NewsWidget.updateAll(app) }
     }
@@ -73,6 +84,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) readIntent(intent)
         setContent {
             NewsTheme {
+              CompositionLocalProvider(LocalPlayer provides player) {
                 val nav = rememberNavController()
                 LaunchedEffect(requestedArticle.value) {
                     val id = requestedArticle.value ?: return@LaunchedEffect
@@ -91,11 +103,15 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     composable("reader/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) {
-                        ReaderScreen(onBack = { nav.popBackStack() })
+                        ReaderScreen(
+                            onBack = { nav.popBackStack() },
+                            onOpenArticle = { nav.navigate("reader/$it") },
+                        )
                     }
                     composable("feeds") { FeedsScreen(onBack = { nav.popBackStack() }) }
                     composable("settings") { SettingsScreen(onBack = { nav.popBackStack() }) }
                 }
+              }
             }
         }
     }
@@ -161,6 +177,32 @@ object AppIcons {
                 "M16,13h1.5v1.5H16V13zM13,16h1.5v1.5H13V16zM14.5,17.5H16V19h-1.5V17.5zM16,16h1.5v1.5H16V16z" +
                 "M17.5,14.5H19V16h-1.5V14.5zM17.5,17.5H19V19h-1.5V17.5zM22,7h-2V4h-3V2h5V7zM22,22v-5h-2v3h-3v2H22z" +
                 "M2,22h5v-2H4v-3H2V22zM2,2v5h2V4h3V2H2z",
+        )
+    }
+
+    val Pause: ImageVector by lazy { icon("Pause", "M6,19h4L10,5L6,5v14zM14,5v14h4L18,5h-4z") }
+
+    /** Circular arrow back; the player writes the seconds into it. */
+    val Replay: ImageVector by lazy {
+        icon(
+            "Replay",
+            "M12,5V1L7,6l5,5V7c3.31,0 6,2.69 6,6s-2.69,6 -6,6 -6,-2.69 -6,-6H4c0,4.42 3.58,8 8,8s8,-3.58 8,-8 -3.58,-8 -8,-8z",
+        )
+    }
+
+    /** Circular arrow forward. */
+    val Forward: ImageVector by lazy {
+        icon(
+            "Forward",
+            "M12,5V1l5,5 -5,5V7c-3.31,0 -6,2.69 -6,6s2.69,6 6,6 6,-2.69 6,-6h2c0,4.42 -3.58,8 -8,8s-8,-3.58 -8,-8 3.58,-8 8,-8z",
+        )
+    }
+
+    /** Headphones: an episode was played to the end. */
+    val Played: ImageVector by lazy {
+        icon(
+            "Played",
+            "M12,3a9,9 0,0 0,-9 9v7c0,1.1 0.9,2 2,2h3v-8H5v-1a7,7 0,0 1,14 0v1h-3v8h3c1.1,0 2,-0.9 2,-2v-7a9,9 0,0 0,-9 -9z",
         )
     }
 

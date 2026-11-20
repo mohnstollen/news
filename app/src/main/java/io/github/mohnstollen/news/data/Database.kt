@@ -127,6 +127,11 @@ data class ArticleListItem(
     val category: String? = null,
     /** When it was marked read; 0 if unread or read before this was recorded. */
     val readAt: Long = 0,
+    /** A podcast episode: the entry has an audio or video file. */
+    val hasAudio: Boolean = false,
+    val durationSeconds: Long? = null,
+    val playPosition: Long = 0,
+    val playedAt: Long = 0,
 )
 
 data class ArticleSyncRow(
@@ -216,7 +221,8 @@ interface FeedDao {
 interface ArticleDao {
     @Query(
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
-            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
+            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId " +
             "WHERE (:feedId IS NULL OR a.feedId = :feedId) AND (:starredOnly = 0 OR a.starred = 1) " +
             "ORDER BY a.pubDate DESC, a.id DESC LIMIT 5000",
@@ -226,7 +232,8 @@ interface ArticleDao {
     /** [match] is an FTS expression, see [SearchQuery]. Read articles are included. */
     @Query(
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
-            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
+            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId JOIN articles_fts ON articles_fts.docid = a.id " +
             "WHERE articles_fts MATCH :match " +
             "AND (:feedId IS NULL OR a.feedId = :feedId) AND (:starredOnly = 0 OR a.starred = 1) " +
@@ -236,7 +243,8 @@ interface ArticleDao {
 
     @Query(
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
-            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
+            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId WHERE a.id IN (:ids) " +
             "ORDER BY a.pubDate DESC, a.id DESC",
     )
@@ -244,7 +252,8 @@ interface ArticleDao {
 
     @Query(
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
-            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
+            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId WHERE a.read = 0 " +
             "ORDER BY a.pubDate DESC, a.id DESC LIMIT :limit",
     )
@@ -318,6 +327,10 @@ interface ArticleDao {
         durationSeconds: Long?,
         imageUrl: String?,
     )
+
+    /** Unlike [setRead], keeps the time an already read article was read. */
+    @Query("UPDATE articles SET read = 1, readAt = :now WHERE id = :id AND read = 0")
+    suspend fun markReadIfUnread(id: Long, now: Long)
 
     @Query("UPDATE articles SET playPosition = :positionMs WHERE id = :id")
     suspend fun setPlayPosition(id: Long, positionMs: Long)

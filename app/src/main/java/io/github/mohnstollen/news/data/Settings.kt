@@ -39,6 +39,8 @@ data class Prefs(
     val ncAutoSync: Boolean = true,
     val lastSync: Long = 0,
     val lastSyncError: String? = null,
+    /** Speed for podcast playback; 1 is normal. */
+    val playbackSpeed: Float = 1f,
 ) {
     val syncConfigured: Boolean get() = ncServer.isNotBlank() && ncUser.isNotBlank()
 }
@@ -73,6 +75,7 @@ class SettingsStore(context: Context) {
             ncAutoSync = sp.getBoolean("ncAutoSync", d.ncAutoSync),
             lastSync = sp.getLong("lastSync", d.lastSync),
             lastSyncError = sp.getString("lastSyncError", d.lastSyncError),
+            playbackSpeed = sp.getFloat("playbackSpeed", d.playbackSpeed),
         )
     }
 
@@ -98,6 +101,7 @@ class SettingsStore(context: Context) {
             .putBoolean("ncAutoSync", p.ncAutoSync)
             .putLong("lastSync", p.lastSync)
             .putString("lastSyncError", p.lastSyncError)
+            .putFloat("playbackSpeed", p.playbackSpeed)
             .apply()
         _flow.value = p
     }

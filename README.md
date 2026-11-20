@@ -24,6 +24,10 @@ RSS-/Atom-Reader für Android (ab Android 8.0), geschrieben in Kotlin mit Jetpac
   einstellbarem Aktualisierungsintervall
 - **OPML** Import und Export
 - **Nextcloud** (WebDAV): gleicht Feeds, gemerkte Artikel und Notizen zwischen Geräten ab
+- **Podcasts**: Folgen mit Audio- oder Videodatei bekommen einen Play-Knopf in der Liste und im
+  Artikel. Wiedergabe im Hintergrund mit Mini-Player, Player mit Positionsregler und Geschwindigkeit
+  (0,8× bis 2×), 10 s zurück / 30 s vor, Steuerung über Benachrichtigung, Sperrbildschirm, Kopfhörer
+  und Bluetooth. Jede Folge merkt sich, wo sie aufgehört hat; zu Ende gehörte Folgen gelten als gelesen
 
 ## Bauen
 

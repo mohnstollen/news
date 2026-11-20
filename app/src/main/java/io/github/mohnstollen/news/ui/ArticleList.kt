@@ -368,6 +368,7 @@ fun ArticleListScreen(
         Scaffold(
             modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
             snackbarHost = { SnackbarHost(snackbar) },
+            bottomBar = { MiniPlayer(onOpenArticle = onOpenArticle) },
             topBar = {
                 if (searching) {
                     SearchBar(
@@ -699,6 +700,15 @@ private fun ArticleRow(item: ArticleListItem, now: Long, modifier: Modifier, onT
                     color = secondary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (item.hasAudio) {
+                EpisodeStatus(
+                    articleId = item.id,
+                    durationSeconds = item.durationSeconds,
+                    playPosition = item.playPosition,
+                    playedAt = item.playedAt,
+                    modifier = Modifier.padding(top = 6.dp),
                 )
             }
         }
