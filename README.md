@@ -20,8 +20,9 @@ RSS-/Atom-Reader für Android (ab Android 8.0), geschrieben in Kotlin mit Jetpac
   nur im WLAN) oder nur manuell
 - **Suche** über Titel, Text, Volltext und Notizen, in allen Artikeln oder im gewählten Feed
 - **Benachrichtigung** bei neuen Artikeln nach einem Hintergrund-Update (abschaltbar, auch pro Feed)
-- **Widget** für den Startbildschirm mit den neuesten ungelesenen Artikeln und eigenem,
-  einstellbarem Aktualisierungsintervall
+- **Widget** für den Startbildschirm mit den neuesten ungelesenen Artikeln aller Feeds, eines
+  Ordners oder eines einzelnen Feeds (pro Widget wählbar, auch mehrere nebeneinander) und mit
+  eigenem, einstellbarem Aktualisierungsintervall
 - **OPML** Import und Export
 - **Nextcloud** (WebDAV): gleicht Feeds, gemerkte Artikel und Notizen zwischen Geräten ab
 
@@ -81,6 +82,6 @@ Keystore abgelegt.
 | `data/Repository.kt` | Aktualisieren, Abonnements, Artikelstatus |
 | `work/RefreshWorker.kt` | Hintergrund-Aktualisierung mit WorkManager |
 | `work/Notifier.kt` | Benachrichtigung über neue Artikel |
-| `widget/NewsWidget.kt` | Startbildschirm-Widget |
+| `widget/` | Startbildschirm-Widget mit Auswahl pro Widget |
 | `ui/QrScanner.kt` | Kamera-Ansicht für den QR-Code |
 | `ui/` | Oberfläche: Artikelliste, Leseansicht, Feeds, Einstellungen |

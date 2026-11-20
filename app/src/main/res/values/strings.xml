@@ -1,6 +1,7 @@
 <resources>
     <string name="app_name">News</string>
-    <string name="widget_description">Neueste ungelesene Artikel</string>
+    <string name="widget_description">Neueste ungelesene Artikel aller Feeds, eines Ordners oder eines Feeds</string>
+    <string name="widget_configure">Auswahl ändern</string>
     <string name="widget_refresh">Aktualisieren</string>
     <string name="widget_empty">Keine ungelesenen Artikel</string>
 </resources>
