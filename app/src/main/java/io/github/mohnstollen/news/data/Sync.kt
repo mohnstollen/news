@@ -6,6 +6,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Credentials
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -101,6 +104,29 @@ class WebDavClient(private val client: OkHttpClient, user: String, password: Str
         }
     }
 
+    /**
+     * Asks Nextcloud for the account's user id, which can differ from the login name (e.g. when
+     * logging in with an e-mail address). Returns the id; the login name if the server has no such
+     * endpoint (not a Nextcloud); null if the answer says nothing either way.
+     */
+    fun ocsUserId(url: HttpUrl, login: String): String? {
+        val request = request(url)
+            .header("OCS-APIRequest", "true")
+            .header("Accept", "application/json")
+            .get().build()
+        client.newCall(request).execute().use { response ->
+            if (response.code == 404) return login
+            if (!response.isSuccessful) return null
+            val body = response.body?.string() ?: return null
+            return try {
+                Json.parseToJsonElement(body).jsonObject["ocs"]?.jsonObject?.get("data")?.jsonObject
+                    ?.get("id")?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
     /** Creates the collection; an existing one is not an error. */
     fun mkcol(url: HttpUrl) {
         client.newCall(request(url).method("MKCOL", null).build()).execute().use { response ->
@@ -118,9 +144,18 @@ object DavUrls {
     fun root(server: String, user: String): HttpUrl {
         val base = normalizeUrl(server.trim().trimEnd('/')).toHttpUrlOrNull()
             ?: throw SyncException("Ungültige Server-Adresse")
-        val path = base.encodedPath
-        if (path.contains("/remote.php/") || path.contains("/dav")) return base
+        if (pointsIntoDav(base)) return base
         return base.newBuilder().addPathSegments("remote.php/dav/files").addPathSegment(user).build()
+    }
+
+    private fun pointsIntoDav(url: HttpUrl) = url.encodedPath.let { it.contains("/remote.php/") || it.contains("/dav") }
+
+    /** Where Nextcloud tells the user id; null if the address already points into WebDAV. */
+    fun ocsUser(server: String): HttpUrl? {
+        val base = normalizeUrl(server.trim().trimEnd('/')).toHttpUrlOrNull()
+            ?: throw SyncException("Ungültige Server-Adresse")
+        if (pointsIntoDav(base)) return null
+        return base.newBuilder().addPathSegments("ocs/v2.php/cloud/user").addQueryParameter("format", "json").build()
     }
 
     fun segments(folder: String): List<String> = folder.split('/').map { it.trim() }.filter { it.isNotEmpty() }
@@ -142,8 +177,9 @@ class SyncManager(
             val prefs = settings.current
             if (!prefs.syncConfigured) throw SyncException("Nextcloud ist nicht eingerichtet")
             try {
-                val dav = WebDavClient(client, prefs.ncUser.trim(), settings.ncPassword)
-                var folder = DavUrls.root(prefs.ncServer, prefs.ncUser.trim())
+                val login = prefs.ncUser.trim()
+                val dav = WebDavClient(client, login, settings.ncPassword)
+                var folder = DavUrls.root(prefs.ncServer, davUser(dav, prefs, login))
                 for (segment in DavUrls.segments(prefs.ncFolder)) {
                     folder = DavUrls.child(folder, segment)
                     dav.mkcol(folder)
@@ -176,6 +212,20 @@ class SyncManager(
                 throw SyncException(message, e)
             }
         }
+    }
+
+    /** The user id for the WebDAV path; looked up once per login and server, then remembered. */
+    private fun davUser(dav: WebDavClient, prefs: Prefs, login: String): String {
+        val key = "$login@${prefs.ncServer.trim()}"
+        if (prefs.ncDavUserFor == key && prefs.ncDavUser.isNotBlank()) return prefs.ncDavUser
+        val url = DavUrls.ocsUser(prefs.ncServer) ?: return login
+        val id = try {
+            dav.ocsUserId(url, login)
+        } catch (e: IOException) {
+            null
+        } ?: return login
+        settings.update { it.copy(ncDavUser = id, ncDavUserFor = key) }
+        return id
     }
 
     private companion object {

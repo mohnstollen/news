@@ -33,6 +33,9 @@ data class Prefs(
     val ncServer: String = "",
     val ncUser: String = "",
     val ncFolder: String = "News",
+    /** Nextcloud user id for the WebDAV path, looked up for the login in [ncDavUserFor]. */
+    val ncDavUser: String = "",
+    val ncDavUserFor: String = "",
     val ncAutoSync: Boolean = true,
     val lastSync: Long = 0,
     val lastSyncError: String? = null,
@@ -65,6 +68,8 @@ class SettingsStore(context: Context) {
             ncServer = sp.getString("ncServer", d.ncServer)!!,
             ncUser = sp.getString("ncUser", d.ncUser)!!,
             ncFolder = sp.getString("ncFolder", d.ncFolder)!!,
+            ncDavUser = sp.getString("ncDavUser", d.ncDavUser)!!,
+            ncDavUserFor = sp.getString("ncDavUserFor", d.ncDavUserFor)!!,
             ncAutoSync = sp.getBoolean("ncAutoSync", d.ncAutoSync),
             lastSync = sp.getLong("lastSync", d.lastSync),
             lastSyncError = sp.getString("lastSyncError", d.lastSyncError),
@@ -88,6 +93,8 @@ class SettingsStore(context: Context) {
             .putString("ncServer", p.ncServer)
             .putString("ncUser", p.ncUser)
             .putString("ncFolder", p.ncFolder)
+            .putString("ncDavUser", p.ncDavUser)
+            .putString("ncDavUserFor", p.ncDavUserFor)
             .putBoolean("ncAutoSync", p.ncAutoSync)
             .putLong("lastSync", p.lastSync)
             .putString("lastSyncError", p.lastSyncError)
