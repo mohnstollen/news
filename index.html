@@ -54,7 +54,7 @@
   .btn:disabled{opacity:.45; cursor:default}
 
   /* ---------- Grundgerüst: Seitenleiste | Liste | Artikel ---------- */
-  #app{display:flex; height:100%; padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom)}
+  #app{display:flex; height:100%; padding-top:var(--safe-area-inset-top, env(safe-area-inset-top)); padding-bottom:var(--safe-area-inset-bottom, env(safe-area-inset-bottom))}
   #side{width:280px; flex:none; background:var(--surface); display:flex; flex-direction:column; border-right:1px solid var(--border)}
   #listPane{flex:1; min-width:0; display:flex; flex-direction:column; position:relative}
   #readerPane{display:none; flex-direction:column; min-width:0; background:var(--bg)}
@@ -67,12 +67,12 @@
   /* schmal: Seitenleiste als Schublade, Artikel als eigene Seite */
   @media (max-width:899px){
     #side{position:fixed; z-index:30; top:0; bottom:0; left:0; transform:translateX(-105%); transition:transform .2s;
-      padding-top:env(safe-area-inset-top); box-shadow:var(--shadow); border-right:0}
+      padding-top:var(--safe-area-inset-top, env(safe-area-inset-top)); box-shadow:var(--shadow); border-right:0}
     body.drawer #side{transform:none}
     #scrim{position:fixed; inset:0; background:var(--overlay); z-index:29; display:none}
     body.drawer #scrim{display:block}
     body.reading #readerPane{display:flex; position:fixed; inset:0; z-index:20;
-      padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom)}
+      padding-top:var(--safe-area-inset-top, env(safe-area-inset-top)); padding-bottom:var(--safe-area-inset-bottom, env(safe-area-inset-bottom))}
   }
   @media (min-width:900px){
     #menuBtn{display:none}
@@ -143,10 +143,10 @@
 
   /* ---------- Seiten (Feeds, Einstellungen) ---------- */
   .page{position:fixed; inset:0; z-index:25; background:var(--bg); display:flex; flex-direction:column;
-    padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom)}
+    padding-top:var(--safe-area-inset-top, env(safe-area-inset-top)); padding-bottom:var(--safe-area-inset-bottom, env(safe-area-inset-bottom))}
   .page .content{flex:1; overflow-y:auto}
   .page .inner{max-width:760px; margin:0 auto; padding:0 0 96px}
-  .fab{position:absolute; right:20px; bottom:calc(20px + env(safe-area-inset-bottom)); border:0; border-radius:16px; padding:16px 20px;
+  .fab{position:absolute; right:20px; bottom:calc(20px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom))); border:0; border-radius:16px; padding:16px 20px;
     background:var(--accent-bg); color:var(--text); font-weight:600; display:flex; gap:10px; align-items:center; cursor:pointer; box-shadow:var(--shadow);
     backdrop-filter:blur(8px)}
   :root[data-theme="dark"] .fab{background:#4a3128} :root[data-theme="light"] .fab{background:#ffdbce}
@@ -190,7 +190,7 @@
   .menu button:hover{background:var(--hover)}
   .menu button .ck{width:18px; color:var(--accent)}
   .menu hr{border:0; border-top:1px solid var(--border); margin:4px 0}
-  #toast{position:fixed; left:50%; bottom:calc(24px + env(safe-area-inset-bottom)); transform:translateX(-50%); z-index:60; background:var(--text); color:var(--bg);
+  #toast{position:fixed; left:50%; bottom:calc(24px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom))); transform:translateX(-50%); z-index:60; background:var(--text); color:var(--bg);
     padding:12px 18px; border-radius:8px; max-width:min(92vw,560px); box-shadow:var(--shadow); display:none; font-size:14px}
   #toast.show{display:block}
   #qrVideo{width:100%; aspect-ratio:4/3; object-fit:cover; border-radius:12px; background:#000; display:block}
@@ -828,7 +828,10 @@ async function storeItems(feed, parsed, now) {
   await tx(['articles', 'bodies'], 'readwrite', t => {
     const as = t.objectStore('articles'), bs = t.objectStore('bodies');
     for (const f of fresh) {
-      as.add(f.meta).onsuccess = e => { f.meta.id = e.target.result; if (f.content) bs.put({ id: f.meta.id, content: f.content, fullText: null }); };
+      const r = as.add(f.meta);
+      r.onsuccess = e => { f.meta.id = e.target.result; if (f.content) bs.put({ id: f.meta.id, content: f.content, fullText: null }); };
+      // Gleichzeitig schon angelegt (z. B. Sync und Laden zugleich): überspringen statt alles abzubrechen
+      r.onerror = e => { e.preventDefault(); e.stopPropagation(); f.dup = true; };
     }
     for (const [a, it] of backfill) {
       a.summary = plainText(it.contentHtml).slice(0, SUMMARY_LENGTH); a.hasContent = true; as.put(a);
@@ -837,9 +840,10 @@ async function storeItems(feed, parsed, now) {
     }
     for (const a of old) { as.delete(a.id); bs.delete(a.id); }
   });
-  fresh.forEach(f => arts.set(f.meta.id, f.meta));
+  const added = fresh.filter(f => !f.dup);
+  added.forEach(f => arts.set(f.meta.id, f.meta));
   old.forEach(a => arts.delete(a.id));
-  return fresh.filter(f => !alreadyRead.has(f)).map(f => f.meta.id);
+  return added.filter(f => !alreadyRead.has(f)).map(f => f.meta.id);
 }
 async function loadFullText(id) {
   const a = arts.get(id);
@@ -1123,9 +1127,13 @@ async function applySyncState(s, applyReads) {
   if (inserts.length) {
     await tx(['articles'], 'readwrite', t => {
       const st = t.objectStore('articles');
-      inserts.forEach(a => { st.add(a).onsuccess = e => { a.id = e.target.result; }; });
+      inserts.forEach(a => {
+        const r = st.add(a);
+        r.onsuccess = e => { a.id = e.target.result; };
+        r.onerror = e => { e.preventDefault(); e.stopPropagation(); };
+      });
     });
-    inserts.forEach(a => arts.set(a.id, a));
+    inserts.filter(a => a.id != null).forEach(a => arts.set(a.id, a));
   }
   return added;
 }
@@ -1327,6 +1335,7 @@ function applyTheme() {
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   document.querySelector('meta[name=theme-color]').content = dark ? '#1a1311' : '#fffbff';
   document.documentElement.style.setProperty('--reader-size', (prefs.fontSize || 17) + 'px');
+  if (PLATFORM === 'android' && Native.SystemBars) Native.SystemBars.setStyle({ style: dark ? 'DARK' : 'LIGHT' }).catch(() => {});
 }
 darkQuery.addEventListener?.('change', applyTheme);
 
@@ -2125,7 +2134,7 @@ async function configureBackground() {
   } catch (e) { console.error(e); }
 }
 async function takeBackground() {
-  if (!BG) return;
+  if (!BG || state.refreshing) return;
   let items = [];
   try { items = (await BG.take()).items || []; } catch (e) { return; }
   let stored = 0;

@@ -141,3 +141,17 @@ test('Feed bearbeiten und löschen, OPML-Import und -Export', async ({ browser }
   expect(out).toContain('<outline text="Technik / Innen" title="Technik / Innen">');
   expect(out).toContain(`title="Umbenannt" xmlUrl="${srv.url}/a"`);
 });
+
+test('Gleichzeitiges Speichern derselben Artikel bricht nichts ab', async ({ browser }) => {
+  srv.page('/feed', rss('Feed', [['a', 'A']]));
+  const { page } = await openApp(browser);
+  await page.evaluate(u => addFeed(u, null), srv.url + '/feed');
+  const r = await page.evaluate(async () => {
+    const feed = [...feeds.values()][0];
+    const parsed = { title: 'Feed', siteUrl: null, items: [{ guid: 'b', title: 'B', link: null, author: null, contentHtml: '<p>x</p>', pubDate: Date.now() }] };
+    const [x, y] = await Promise.all([storeItems(feed, parsed, Date.now()), storeItems(feed, parsed, Date.now())]);
+    const loaded = await getAll('articles');
+    return { ids: x.length + y.length, mem: [...arts.values()].filter(a => a.guid === 'b').length, db: loaded.filter(a => a.guid === 'b').length };
+  });
+  expect(r).toEqual({ ids: 1, mem: 1, db: 1 });
+});
