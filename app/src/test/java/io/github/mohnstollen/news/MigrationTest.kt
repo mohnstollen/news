@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -70,6 +71,11 @@ class MigrationTest {
             assertTrue(article.starred)
             assertTrue(article.read)
             assertEquals("read before this was recorded", 0L, article.readAt)
+            assertNull("no media file yet", article.enclosureUrl)
+            assertEquals(0L, article.playPosition)
+            assertEquals(0L, article.playedAt)
+            assertNull(article.downloadPath)
+            assertNull(feed.imageUrl)
 
             // Existing articles are searchable, and so are later changes.
             suspend fun search(text: String) =

@@ -236,6 +236,52 @@ class RepositoryTest {
     }
 
     @Test
+    fun podcastEpisodesKeepTheirMediaAndPlaybackState() = runBlocking {
+        val d = device()
+        fun podcast(withAudio: Boolean) = buildString {
+            append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+            append("<rss version=\"2.0\" xmlns:itunes=\"http://www.itunes.com/dtds/podcast-1.0.dtd\"><channel>")
+            append("<title>Podcast</title><link>${url("/")}</link>")
+            if (withAudio) append("<itunes:image href=\"${url("/cover.jpg")}\"/>")
+            append("<item><guid>ep-1</guid><title>Folge 1</title>")
+            if (withAudio) {
+                append("<itunes:duration>30:00</itunes:duration>")
+                append("<enclosure url=\"${url("/ep1.mp3")}\" type=\"audio/mpeg\" length=\"2048\"/>")
+            }
+            append("</item></channel></rss>")
+        }
+        // Stored as by an older version of the app, which did not keep the audio file.
+        serve("/podcast.xml", podcast(withAudio = false))
+        val feed = d.repo.addFeed(url("/podcast.xml"), null)
+        val id = d.repo.articleDao.observeList(null, false).first().single().id
+        assertNull(d.repo.articleDao.byId(id)!!.enclosureUrl)
+        d.repo.articleDao.setPlayPosition(id, 61_000)
+
+        serve("/podcast.xml", podcast(withAudio = true))
+        assertEquals(0, d.repo.refresh(feed.id).newArticles)
+        val episode = d.repo.articleDao.byId(id)!!
+        assertEquals(url("/ep1.mp3"), episode.enclosureUrl)
+        assertEquals("audio/mpeg", episode.enclosureType)
+        assertEquals(2048L, episode.enclosureLength)
+        assertEquals(1800L, episode.durationSeconds)
+        assertEquals("the position survives the update", 61_000L, episode.playPosition)
+        assertEquals(url("/cover.jpg"), d.repo.feedDao.byId(feed.id)!!.imageUrl)
+
+        d.repo.articleDao.setPlayed(id, 5_000)
+        d.repo.articleDao.byId(id)!!.let {
+            assertEquals(5_000L, it.playedAt)
+            assertEquals("played to the end starts over", 0L, it.playPosition)
+        }
+
+        // A downloaded episode is not cleaned up while its file exists.
+        d.repo.articleDao.setDownloadPath(id, "/files/episodes/1.mp3")
+        d.repo.setRead(listOf(id), true)
+        assertEquals(0, d.repo.articleDao.deleteOld(feed.id, Long.MAX_VALUE, listOf("andere")))
+        d.repo.articleDao.setDownloadPath(id, null)
+        assertEquals(1, d.repo.articleDao.deleteOld(feed.id, Long.MAX_VALUE, listOf("andere")))
+    }
+
+    @Test
     fun fullTextIsExtractedFromTheLinkedPage() = runBlocking {
         val d = device()
         val paragraphs = (1..8).joinToString("") {

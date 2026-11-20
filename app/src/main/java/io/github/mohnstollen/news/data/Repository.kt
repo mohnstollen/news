@@ -77,7 +77,9 @@ class Repository(
                 }
                 is FeedFetcher.Result.Fetched -> {
                     val newIds = storeItems(feed, result.feed, now)
-                    feedDao.fetchSucceeded(feed.id, now, result.etag, result.lastModified, result.feed.siteUrl)
+                    feedDao.fetchSucceeded(
+                        feed.id, now, result.etag, result.lastModified, result.feed.siteUrl, result.feed.imageUrl,
+                    )
                     if (feed.fetchFullText) {
                         newIds.take(MAX_FULL_TEXT_PER_REFRESH).forEach { runCatchingCancellable { loadFullText(it) } }
                     }
@@ -108,6 +110,11 @@ class Repository(
                 // entry to the top of the list, so they are capped.
                 pubDate = (item.pubDate ?: (now - index)).coerceAtMost(now),
                 fetchedAt = now,
+                enclosureUrl = item.enclosure?.url,
+                enclosureType = item.enclosure?.type,
+                enclosureLength = item.enclosure?.length,
+                durationSeconds = item.durationSeconds,
+                imageUrl = item.imageUrl,
             )
         }
         val retention = settings.current.retentionDays
@@ -119,6 +126,18 @@ class Repository(
             if (missing.isNotEmpty()) {
                 articles.filter { it.guid in missing && it.content != null }.forEach {
                     articleDao.backfillContent(feed.id, it.guid, it.content, it.summary)
+                }
+            }
+
+            // Entries stored before podcast support, or through sync, get their media file.
+            val withEnclosure = articles.filter { it.enclosureUrl != null }
+            if (withEnclosure.isNotEmpty()) {
+                val noEnclosure = articleDao.guidsWithoutEnclosure(feed.id).toSet()
+                withEnclosure.filter { it.guid in noEnclosure }.forEach {
+                    articleDao.backfillEnclosure(
+                        feed.id, it.guid, it.enclosureUrl!!, it.enclosureType, it.enclosureLength,
+                        it.durationSeconds, it.imageUrl,
+                    )
                 }
             }
 

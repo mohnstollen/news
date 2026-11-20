@@ -35,6 +35,8 @@ data class Feed(
     val updatedAt: Long = 0,
     /** Include this feed's new articles in the "new articles" notification. */
     @ColumnInfo(defaultValue = "1") val notify: Boolean = true,
+    /** Cover art from the feed (podcast artwork); null if the feed has none. */
+    val imageUrl: String? = null,
 )
 
 @Entity(
@@ -71,6 +73,21 @@ data class Article(
     val note: String? = null,
     /** Last time star or note changed; 0 if never. Used for sync. */
     val stateUpdatedAt: Long = 0,
+    /** Attached audio or video file (podcast episode); null for plain articles. */
+    val enclosureUrl: String? = null,
+    val enclosureType: String? = null,
+    /** File size in bytes as stated by the feed; null if unknown. */
+    val enclosureLength: Long? = null,
+    /** Playing time in seconds as stated by the feed; null if unknown. */
+    val durationSeconds: Long? = null,
+    /** Artwork of the episode; null to fall back to the feed's image. */
+    val imageUrl: String? = null,
+    /** Where playback stopped, in milliseconds; 0 if never started or played to the end. */
+    @ColumnInfo(defaultValue = "0") val playPosition: Long = 0,
+    /** When the episode was played to the end; 0 if not. */
+    @ColumnInfo(defaultValue = "0") val playedAt: Long = 0,
+    /** Downloaded file in app storage; null if not downloaded. */
+    val downloadPath: String? = null,
 )
 
 /** Full-text index over the searchable columns of [Article]; Room keeps it in sync. */
@@ -164,9 +181,16 @@ interface FeedDao {
 
     @Query(
         "UPDATE feeds SET lastFetched = :now, lastError = NULL, etag = :etag, lastModified = :lastModified, " +
-            "siteUrl = COALESCE(:siteUrl, siteUrl) WHERE id = :id",
+            "siteUrl = COALESCE(:siteUrl, siteUrl), imageUrl = COALESCE(:imageUrl, imageUrl) WHERE id = :id",
     )
-    suspend fun fetchSucceeded(id: Long, now: Long, etag: String?, lastModified: String?, siteUrl: String?)
+    suspend fun fetchSucceeded(
+        id: Long,
+        now: Long,
+        etag: String?,
+        lastModified: String?,
+        siteUrl: String?,
+        imageUrl: String? = null,
+    )
 
     @Query("UPDATE feeds SET lastFetched = :now, lastError = :error WHERE id = :id")
     suspend fun fetchFailed(id: Long, now: Long, error: String)
@@ -276,10 +300,43 @@ interface ArticleDao {
     )
     suspend fun backfillContent(feedId: Long, guid: String, content: String?, summary: String)
 
-    /** Removes old, read entries that the feed no longer lists (so they cannot come back as unread). */
+    /** Entries stored without an attached media file: from before version 4, or added through sync. */
+    @Query("SELECT guid FROM articles WHERE feedId = :feedId AND enclosureUrl IS NULL")
+    suspend fun guidsWithoutEnclosure(feedId: Long): List<String>
+
+    @Query(
+        "UPDATE articles SET enclosureUrl = :url, enclosureType = :type, enclosureLength = :length, " +
+            "durationSeconds = :durationSeconds, imageUrl = COALESCE(imageUrl, :imageUrl) " +
+            "WHERE feedId = :feedId AND guid = :guid AND enclosureUrl IS NULL",
+    )
+    suspend fun backfillEnclosure(
+        feedId: Long,
+        guid: String,
+        url: String,
+        type: String?,
+        length: Long?,
+        durationSeconds: Long?,
+        imageUrl: String?,
+    )
+
+    @Query("UPDATE articles SET playPosition = :positionMs WHERE id = :id")
+    suspend fun setPlayPosition(id: Long, positionMs: Long)
+
+    /** [playedAt] is the current time when finished, 0 to mark as not played. Resets the position. */
+    @Query("UPDATE articles SET playedAt = :playedAt, playPosition = 0 WHERE id = :id")
+    suspend fun setPlayed(id: Long, playedAt: Long)
+
+    @Query("UPDATE articles SET downloadPath = :path WHERE id = :id")
+    suspend fun setDownloadPath(id: Long, path: String?)
+
+    /**
+     * Removes old, read entries that the feed no longer lists (so they cannot come back as unread).
+     * Downloaded episodes stay until their file is deleted.
+     */
     @Query(
         "DELETE FROM articles WHERE feedId = :feedId AND read = 1 AND starred = 0 " +
-            "AND (note IS NULL OR note = '') AND pubDate < :cutoff AND guid NOT IN (:keepGuids)",
+            "AND (note IS NULL OR note = '') AND downloadPath IS NULL " +
+            "AND pubDate < :cutoff AND guid NOT IN (:keepGuids)",
     )
     suspend fun deleteOld(feedId: Long, cutoff: Long, keepGuids: List<String>): Int
 
@@ -292,7 +349,7 @@ interface ArticleDao {
 
 @Database(
     entities = [Feed::class, Article::class, DeletedFeed::class, ArticleFts::class],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -320,7 +377,22 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+        /** Podcast support: attached media files, artwork, playback position and downloads. */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE feeds ADD COLUMN imageUrl TEXT")
+                db.execSQL("ALTER TABLE articles ADD COLUMN enclosureUrl TEXT")
+                db.execSQL("ALTER TABLE articles ADD COLUMN enclosureType TEXT")
+                db.execSQL("ALTER TABLE articles ADD COLUMN enclosureLength INTEGER")
+                db.execSQL("ALTER TABLE articles ADD COLUMN durationSeconds INTEGER")
+                db.execSQL("ALTER TABLE articles ADD COLUMN imageUrl TEXT")
+                db.execSQL("ALTER TABLE articles ADD COLUMN playPosition INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE articles ADD COLUMN playedAt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE articles ADD COLUMN downloadPath TEXT")
+            }
+        }
+
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
     }
 }
 

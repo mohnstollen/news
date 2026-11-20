@@ -1,6 +1,8 @@
 package io.github.mohnstollen.news
 
 import io.github.mohnstollen.news.data.DateParser
+import io.github.mohnstollen.news.data.DurationParser
+import io.github.mohnstollen.news.data.MediaTypes
 import io.github.mohnstollen.news.data.FeedParser
 import io.github.mohnstollen.news.data.NotAFeedException
 import org.jsoup.Jsoup
@@ -147,5 +149,143 @@ class FeedParserTest {
         assertNotNull(DateParser.parse("2026-11-16"))
         assertNull(DateParser.parse("gestern"))
         assertNull(DateParser.parse(""))
+    }
+
+    @Test
+    fun podcastRss() {
+        val feed = parse(
+            """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+              <channel>
+                <title>Der Podcast</title>
+                <link>https://example.org/</link>
+                <itunes:image href="https://cdn.example.org/cover.jpg"/>
+                <image><url>https://example.org/klein.png</url></image>
+                <item>
+                  <title>Folge 2</title>
+                  <guid isPermaLink="false">ep-2</guid>
+                  <itunes:author>Max Muster</itunes:author>
+                  <itunes:duration>1:02:03</itunes:duration>
+                  <itunes:image href="/folge2.jpg"/>
+                  <enclosure url="https://cdn.example.org/titelbild.jpg" type="image/jpeg" length="1000"/>
+                  <enclosure url="/audio/folge2.mp3" type="audio/mpeg; charset=binary" length="12345678"/>
+                </item>
+                <item>
+                  <title>Folge 1</title>
+                  <itunes:duration>754</itunes:duration>
+                  <enclosure url="https://cdn.example.org/folge1.m4a?token=x" length="0"/>
+                </item>
+                <item>
+                  <title>Nur ein Bild</title>
+                  <enclosure url="https://example.org/bild.jpg" type="image/jpeg" length="1"/>
+                </item>
+              </channel>
+            </rss>
+            """.trimIndent(),
+        )
+        assertEquals("itunes:image wins over the channel image", "https://cdn.example.org/cover.jpg", feed.imageUrl)
+
+        val ep2 = feed.items[0]
+        assertEquals("Max Muster", ep2.author)
+        assertEquals(3723L, ep2.durationSeconds)
+        assertEquals("https://example.org/folge2.jpg", ep2.imageUrl)
+        val audio = ep2.enclosure!!
+        assertEquals("the image enclosure is skipped", "https://example.org/audio/folge2.mp3", audio.url)
+        assertEquals("audio/mpeg", audio.type)
+        assertEquals(12345678L, audio.length)
+
+        val ep1 = feed.items[1]
+        assertEquals(754L, ep1.durationSeconds)
+        assertNull(ep1.imageUrl)
+        assertEquals("type guessed from the file name", "audio/mp4", ep1.enclosure!!.type)
+        assertNull("length 0 means unknown", ep1.enclosure!!.length)
+
+        assertNull("images are not episodes", feed.items[2].enclosure)
+    }
+
+    @Test
+    fun mediaRssAndChannelImage() {
+        val feed = parse(
+            """
+            <rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+              <channel>
+                <title>Video</title>
+                <image><url>https://example.org/logo.png</url></image>
+                <item>
+                  <title>Clip</title>
+                  <media:group>
+                    <media:content url="https://example.org/clip.webm" type="video/webm" fileSize="999" duration="95"/>
+                    <media:thumbnail url="https://example.org/clip.jpg"/>
+                  </media:group>
+                </item>
+                <item>
+                  <title>Mit Foto</title>
+                  <media:content url="https://example.org/foto.jpg" medium="image"/>
+                  <enclosure url="ftp://example.org/datei.mp3" type="audio/mpeg"/>
+                </item>
+              </channel>
+            </rss>
+            """.trimIndent(),
+        )
+        assertEquals("https://example.org/logo.png", feed.imageUrl)
+        val clip = feed.items[0]
+        assertEquals("https://example.org/clip.webm", clip.enclosure!!.url)
+        assertEquals("video/webm", clip.enclosure!!.type)
+        assertEquals(999L, clip.enclosure!!.length)
+        assertEquals(95L, clip.durationSeconds)
+        assertEquals("https://example.org/clip.jpg", clip.imageUrl)
+
+        val photo = feed.items[1]
+        assertNull("only http(s) media, and photos are not episodes", photo.enclosure)
+        assertEquals("https://example.org/foto.jpg", photo.imageUrl)
+    }
+
+    @Test
+    fun atomEnclosure() {
+        val feed = parse(
+            """
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <title>Atom-Podcast</title>
+              <logo>/logo.svg</logo>
+              <entry>
+                <title>Episode</title>
+                <id>urn:ep:1</id>
+                <link rel="alternate" href="https://example.org/ep1"/>
+                <link rel="enclosure" href="https://example.org/ep1.ogg" type="audio/ogg" length="4242"/>
+              </entry>
+              <entry>
+                <title>Ohne Audio</title>
+                <id>urn:ep:2</id>
+              </entry>
+            </feed>
+            """.trimIndent(),
+        )
+        assertEquals("https://example.org/logo.svg", feed.imageUrl)
+        assertEquals("https://example.org/ep1", feed.items[0].link)
+        assertEquals("https://example.org/ep1.ogg", feed.items[0].enclosure!!.url)
+        assertEquals(4242L, feed.items[0].enclosure!!.length)
+        assertNull(feed.items[1].enclosure)
+    }
+
+    @Test
+    fun durations() {
+        assertEquals(45L, DurationParser.parse("45"))
+        assertEquals(125L, DurationParser.parse("2:05"))
+        assertEquals(3723L, DurationParser.parse(" 01:02:03 "))
+        assertEquals(90L, DurationParser.parse("90.7"))
+        for (bad in listOf("", "0", "00:00:00", "abc", "1:2:3:4", "1:", "-5", "NaN", "Infinity")) {
+            assertNull("'$bad'", DurationParser.parse(bad))
+        }
+    }
+
+    @Test
+    fun mediaTypesFromFileNames() {
+        assertEquals("audio/mpeg", MediaTypes.fromUrl("https://example.org/a/b.MP3?x=1#t"))
+        assertEquals("video/mp4", MediaTypes.fromUrl("https://example.org/v.m4v"))
+        assertNull(MediaTypes.fromUrl("https://example.org/seite.html"))
+        assertNull(MediaTypes.fromUrl("https://example.org/download"))
+        assertNull(MediaTypes.fromUrl("https://example.mp3/download"))
+        assertTrue(MediaTypes.isPlayable("application/ogg"))
     }
 }
