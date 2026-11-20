@@ -5,6 +5,7 @@ import androidx.room.Room
 import io.github.mohnstollen.news.data.AppDatabase
 import io.github.mohnstollen.news.data.FeedFetcher
 import io.github.mohnstollen.news.data.FullTextExtractor
+import io.github.mohnstollen.news.data.NcLoginFlow
 import io.github.mohnstollen.news.data.Repository
 import io.github.mohnstollen.news.data.SettingsStore
 import io.github.mohnstollen.news.data.SyncManager
@@ -19,6 +20,7 @@ class AppContainer(app: Application) {
     val settings = SettingsStore(app)
     val repository = Repository(db, FeedFetcher(http), FullTextExtractor(http), settings)
     val sync = SyncManager(http, settings, repository)
+    val loginFlow = NcLoginFlow(http, settings, sync, repository)
 }
 
 open class NewsApp : Application() {

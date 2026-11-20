@@ -287,6 +287,68 @@ class QrLoginUiTest : UiTestBase() {
     }
 }
 
+class LoginFlowUiTest : UiTestBase() {
+    @Test(timeout = 120000)
+    fun signInOnTheNextcloudPageThenSync() {
+        val server = okhttp3.mockwebserver.MockWebServer()
+        val credentials = okhttp3.Credentials.basic("erika@example.org", "AbCdE-fGhIj")
+        val granted = java.util.concurrent.atomic.AtomicBoolean(false)
+        val davPaths = java.util.concurrent.CopyOnWriteArrayList<String>()
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): okhttp3.mockwebserver.MockResponse {
+                val path = request.requestUrl!!.encodedPath
+                val ok = okhttp3.mockwebserver.MockResponse()
+                return when {
+                    path == "/index.php/login/v2" -> ok.setBody(
+                        "{\"poll\":{\"token\":\"t\",\"endpoint\":\"${server.url("/login/v2/poll")}\"}," +
+                            "\"login\":\"${server.url("/login/v2/flow/xyz")}\"}",
+                    )
+                    path == "/login/v2/poll" ->
+                        if (!granted.get()) ok.setResponseCode(404)
+                        else ok.setBody(
+                            "{\"server\":\"${server.url("/").toString().trimEnd('/')}\"," +
+                                "\"loginName\":\"erika@example.org\",\"appPassword\":\"AbCdE-fGhIj\"}",
+                        )
+                    request.getHeader("Authorization") != credentials -> ok.setResponseCode(401)
+                    path == "/ocs/v2.php/cloud/user" -> ok.setBody("{\"ocs\":{\"data\":{\"id\":\"erika\"}}}")
+                    request.method == "GET" -> ok.setResponseCode(404)
+                    else -> ok.setResponseCode(201).also { davPaths += "${request.method} $path" }
+                }
+            }
+        }
+        server.start()
+        try {
+            waitFor("Artikel Nummer 1")
+            compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
+            compose.onNodeWithText("Einstellungen").performClick()
+            waitFor("Mit Nextcloud anmelden")
+            compose.onNodeWithText("Server-Adresse").performScrollTo().performTextInput(server.url("/").toString())
+            compose.onNodeWithText("Mit Nextcloud anmelden").performScrollTo().performClick()
+
+            // The login page opens; the app waits.
+            waitFor("Zugriff gewähren")
+            val opened = org.robolectric.Shadows.shadowOf(compose.activity).nextStartedActivity
+            assertEquals(android.content.Intent.ACTION_VIEW, opened.action)
+            assertEquals(server.url("/login/v2/flow/xyz").toString(), opened.dataString)
+            compose.onNodeWithText("Seite erneut öffnen").assertExists()
+
+            // The user grants access in the browser.
+            granted.set(true)
+            compose.waitUntil(15_000) {
+                compose.onAllNodesWithText("Synchronisiert.").fetchSemanticsNodes().isNotEmpty()
+            }
+            val settings = context.container.settings
+            assertEquals("erika@example.org", settings.current.ncUser)
+            assertEquals("AbCdE-fGhIj", settings.ncPassword)
+            compose.onNodeWithText("erika@example.org").assertExists()
+            assertTrue(davPaths.toString(), "PUT /remote.php/dav/files/erika/News/news-sync.json" in davPaths)
+            assertTrue(compose.onAllNodesWithText("Zugriff gewähren", substring = true).fetchSemanticsNodes().isEmpty())
+        } finally {
+            server.shutdown()
+        }
+    }
+}
+
 class SearchUiTest : UiTestBase() {
     @Test(timeout = 120000)
     fun searchFiltersTheListAndClosingRestoresIt() {

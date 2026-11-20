@@ -41,12 +41,19 @@ Die APK liegt danach unter `app/build/outputs/apk/debug/app-debug.apk`.
 
 ## Nextcloud-Synchronisation
 
-Am einfachsten: In Nextcloud unter **Persönliche Einstellungen → Sicherheit** ein App-Passwort
-erstellen und **„QR-Code für mobile Apps anzeigen“**. In der App unter **Einstellungen →
-Nextcloud-Synchronisation → „Mit QR-Code anmelden“** den Code scannen; Server, Benutzer und
-Passwort werden übernommen und gleich synchronisiert. Der Text des QR-Codes (`nc://login/…`)
-lässt sich alternativ ins Feld „Server-Adresse“ einfügen. Von Hand geht es mit Server-Adresse,
-Benutzername und App-Passwort.
+In der App unter **Einstellungen → Nextcloud-Synchronisation** einer von drei Wegen:
+
+- **„Mit Nextcloud anmelden“** (am einfachsten): Server-Adresse eintragen, antippen, auf der
+  Anmeldeseite der Nextcloud anmelden und „Zugriff gewähren“ (Login Flow v2). Die App erhält ein
+  eigenes App-Passwort „News (Android)“, speichert alles und synchronisiert. Die Seite öffnet sich
+  als Custom Tab über der App; nach dem Schließen ist man zurück.
+- **„Mit QR-Code anmelden“**: In Nextcloud unter **Persönliche Einstellungen → Sicherheit** ein
+  App-Passwort erstellen und **„QR-Code für mobile Apps anzeigen“**, dann den Code scannen.
+- **Von Hand**: Server-Adresse, Benutzername und App-Passwort eintragen.
+
+Bei den ersten beiden Wegen werden Server, Benutzer und Passwort übernommen und gleich
+synchronisiert. Der Text des QR-Codes (`nc://login/…`) lässt sich alternativ ins Feld
+„Server-Adresse“ einfügen.
 
 Die Kamera wird nur für den Scan gebraucht (CameraX und ZXing, ohne Google-Dienste). Meldet man
 sich mit einer E-Mail-Adresse an, ermittelt die App beim ersten Sync die Nextcloud-Benutzer-ID
@@ -70,7 +77,7 @@ Keystore abgelegt.
 | `data/Network.kt` | Abruf, Feed-Suche auf Webseiten, Volltext-Extraktion |
 | `data/Opml.kt` | OPML lesen und schreiben |
 | `data/Sync.kt` | WebDAV-Client und Abgleich |
-| `data/NextcloudLogin.kt` | Anmelde-QR-Code lesen und dekodieren |
+| `data/NextcloudLogin.kt` | Anmeldung: Login Flow v2, Anmelde-QR-Code lesen und dekodieren |
 | `data/Repository.kt` | Aktualisieren, Abonnements, Artikelstatus |
 | `work/RefreshWorker.kt` | Hintergrund-Aktualisierung mit WorkManager |
 | `work/Notifier.kt` | Benachrichtigung über neue Artikel |
