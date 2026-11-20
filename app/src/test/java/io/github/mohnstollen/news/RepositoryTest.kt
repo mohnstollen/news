@@ -61,6 +61,12 @@ class RepositoryTest {
     private var ocsUserId: String? = null
     private val ocsRequests = java.util.concurrent.atomic.AtomicInteger()
 
+    /** Fake Login Flow v2: whether the server offers it, and how often a poll is answered "not yet". */
+    private var loginFlowAvailable = true
+    private val pollsBeforeGrant = java.util.concurrent.atomic.AtomicInteger(0)
+    private val pollRequests = java.util.concurrent.atomic.AtomicInteger()
+    private val loginRequests = java.util.concurrent.CopyOnWriteArrayList<String>()
+
     private lateinit var settings: SettingsStore
     private val databases = mutableListOf<AppDatabase>()
 
@@ -77,6 +83,25 @@ class RepositoryTest {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.requestUrl!!.encodedPath
+                if (path == "/index.php/login/v2" && request.method == "POST") {
+                    loginRequests += "${request.getHeader("User-Agent")} ${request.getHeader("Authorization")}"
+                    if (!loginFlowAvailable) return MockResponse().setResponseCode(404)
+                    return MockResponse().setHeader("Content-Type", "application/json").setBody(
+                        "{\"poll\":{\"token\":\"tok-123\",\"endpoint\":\"${url("/login/v2/poll")}\"}," +
+                            "\"login\":\"${url("/login/v2/flow/abc")}\"}",
+                    )
+                }
+                if (path == "/login/v2/poll") {
+                    pollRequests.incrementAndGet()
+                    if (request.method != "POST" || request.body.readUtf8() != "token=tok-123") {
+                        return MockResponse().setResponseCode(400)
+                    }
+                    if (pollsBeforeGrant.getAndDecrement() > 0) return MockResponse().setResponseCode(404)
+                    return MockResponse().setHeader("Content-Type", "application/json").setBody(
+                        "{\"server\":\"${url("/").trimEnd('/')}\",\"loginName\":\"erika@example.org\"," +
+                            "\"appPassword\":\"app-passwort\"}",
+                    )
+                }
                 if (path == "/ocs/v2.php/cloud/user") {
                     ocsRequests.incrementAndGet()
                     val id = ocsUserId ?: return MockResponse().setResponseCode(404)
@@ -409,6 +434,90 @@ class RepositoryTest {
         a.sync.sync()
         assertEquals(2, ocsRequests.get())
         assertTrue("/remote.php/dav/files/direkt/News/news-sync.json" in dav.keys)
+    }
+
+    private fun loginFlow(d: Device, timeoutMs: Long = 60_000) =
+        io.github.mohnstollen.news.data.NcLoginFlow(http, settings, d.sync, d.repo, pollIntervalMs = 10, timeoutMs = timeoutMs)
+
+    private suspend fun io.github.mohnstollen.news.data.NcLoginFlow.awaitEnd() =
+        kotlinx.coroutines.withTimeout(10_000) {
+            state.first {
+                it is io.github.mohnstollen.news.data.NcLoginFlow.State.Done ||
+                    it is io.github.mohnstollen.news.data.NcLoginFlow.State.Failed
+            }
+        }
+
+    @Test
+    fun loginFlowSignsInWithANewAppPasswordAndSyncs() = runBlocking {
+        val d = device()
+        settings.update { it.copy(ncServer = "", ncUser = "") }
+        ocsUserId = "erika-id"
+        pollsBeforeGrant.set(2)
+        val flow = loginFlow(d)
+
+        // Also from an address that points into WebDAV.
+        val page = flow.begin(url("/remote.php/dav/files/erika/"), " Lesen/News ")
+        assertEquals(url("/login/v2/flow/abc"), page)
+        assertEquals(io.github.mohnstollen.news.data.NcLoginFlow.State.Waiting(page), flow.state.value)
+        assertEquals("named after the app, without credentials", listOf("News (Android) null"), loginRequests)
+
+        val end = flow.awaitEnd() as io.github.mohnstollen.news.data.NcLoginFlow.State.Done
+        assertEquals("Synchronisiert.", end.message)
+        assertEquals("erika@example.org", end.credentials.user)
+        assertEquals(3, pollRequests.get())
+        assertEquals(url("/").trimEnd('/'), settings.current.ncServer)
+        assertEquals("erika@example.org", settings.current.ncUser)
+        assertEquals("Lesen/News", settings.current.ncFolder)
+        assertEquals("app-passwort", settings.ncPassword)
+        assertTrue(dav.keys.toString(), "/remote.php/dav/files/erika-id/Lesen/News/news-sync.json" in dav.keys)
+
+        flow.acknowledge()
+        assertEquals(io.github.mohnstollen.news.data.NcLoginFlow.State.Idle, flow.state.value)
+    }
+
+    @Test
+    fun loginFlowExplainsProblemsAndCanBeCancelled() = runBlocking {
+        val d = device()
+        val flow = loginFlow(d)
+
+        fun message(block: suspend () -> Unit): String = try {
+            runBlocking { block() }
+            fail("expected a SyncException")
+            ""
+        } catch (e: SyncException) {
+            e.message!!
+        }
+        assertTrue(message { flow.begin(" ", "News") }.contains("Adresse"))
+        loginFlowAvailable = false
+        assertTrue(message { flow.begin(url("/"), "News") }.contains("keine Nextcloud"))
+        assertEquals(io.github.mohnstollen.news.data.NcLoginFlow.State.Idle, flow.state.value)
+
+        // Cancelled while waiting: no more polling, nothing saved.
+        loginFlowAvailable = true
+        pollsBeforeGrant.set(1_000_000)
+        flow.begin(url("/"), "News")
+        kotlinx.coroutines.withTimeout(5_000) { while (pollRequests.get() < 2) kotlinx.coroutines.delay(5) }
+        flow.cancel()
+        assertEquals(io.github.mohnstollen.news.data.NcLoginFlow.State.Idle, flow.state.value)
+        val polled = pollRequests.get()
+        kotlinx.coroutines.delay(200)
+        assertTrue(pollRequests.get() <= polled + 1)
+        assertEquals("", settings.ncPassword)
+
+        // Never granted: gives up after the time limit.
+        val impatient = loginFlow(d, timeoutMs = 100)
+        impatient.begin(url("/"), "News")
+        val end = impatient.awaitEnd() as io.github.mohnstollen.news.data.NcLoginFlow.State.Failed
+        assertTrue(end.message.contains("abgelaufen"))
+    }
+
+    @Test
+    fun loginFlowStartAddress() {
+        fun init(server: String) = io.github.mohnstollen.news.data.NcLoginFlow.initUrl(server).toString()
+        assertEquals("https://cloud.example.org/index.php/login/v2", init("cloud.example.org/"))
+        assertEquals("https://example.org/nextcloud/index.php/login/v2", init("https://example.org/nextcloud/index.php"))
+        assertEquals("https://example.org/nc/index.php/login/v2", init("https://example.org/nc/remote.php/dav/files/erika"))
+        assertEquals("http://192.168.1.5:8080/index.php/login/v2", init("http://192.168.1.5:8080"))
     }
 
     @Test

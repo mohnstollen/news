@@ -1,6 +1,16 @@
 package io.github.mohnstollen.news.ui
 
 import android.Manifest
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.net.Uri
+import android.widget.Toast
+import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import android.os.Build
 import android.text.format.DateUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -58,6 +68,8 @@ import io.github.mohnstollen.news.data.DEFAULT_INTERVAL_MINUTES
 import io.github.mohnstollen.news.data.MIN_INTERVAL_MINUTES
 import io.github.mohnstollen.news.data.NcCredentials
 import io.github.mohnstollen.news.data.NcLogin
+import io.github.mohnstollen.news.data.NcLoginFlow
+import io.github.mohnstollen.news.data.syncResultText
 import io.github.mohnstollen.news.data.Prefs
 import io.github.mohnstollen.news.data.ReadVisibility
 import io.github.mohnstollen.news.work.RefreshWorker
@@ -173,6 +185,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     if (added > 0) container.repository.scope.launch { container.repository.refreshAll() }
                     added
                 },
+                loginFlow = container.loginFlow,
             )
             SwitchRow(
                 title = "Bei jedem Hintergrund-Update synchronisieren",
@@ -264,12 +277,14 @@ private fun NotificationRow(enabled: Boolean, autoUpdate: Boolean, onChange: (Bo
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun NextcloudSection(
     prefs: Prefs,
     initialPassword: String,
     onSave: (server: String, user: String, password: String, folder: String) -> Unit,
     onSync: suspend () -> Int,
+    loginFlow: NcLoginFlow,
 ) {
     var server by rememberSaveable { mutableStateOf(prefs.ncServer) }
     var user by rememberSaveable { mutableStateOf(prefs.ncUser) }
@@ -278,6 +293,9 @@ private fun NextcloudSection(
     var busy by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) }
     var scanning by rememberSaveable { mutableStateOf(false) }
+    var startingLogin by remember { mutableStateOf(false) }
+    val loginState by loginFlow.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val fieldModifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
 
@@ -287,11 +305,7 @@ private fun NextcloudSection(
         result = null
         scope.launch {
             result = try {
-                when (val added = onSync()) {
-                    0 -> "Synchronisiert."
-                    1 -> "Synchronisiert, 1 Feed hinzugefügt."
-                    else -> "Synchronisiert, $added Feeds hinzugefügt."
-                }
+                syncResultText(onSync())
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -310,6 +324,48 @@ private fun NextcloudSection(
         saveAndSync()
     }
 
+    // Login Flow v2 runs in the app; this screen only shows its progress and result.
+    LaunchedEffect(loginState) {
+        when (val state = loginState) {
+            is NcLoginFlow.State.Syncing -> {
+                server = state.credentials.server
+                user = state.credentials.user
+                password = state.credentials.password
+                result = null
+            }
+            is NcLoginFlow.State.Done -> {
+                server = state.credentials.server
+                user = state.credentials.user
+                password = state.credentials.password
+                result = state.message
+                loginFlow.acknowledge()
+            }
+            is NcLoginFlow.State.Failed -> {
+                result = state.message
+                loginFlow.acknowledge()
+            }
+            else -> Unit
+        }
+    }
+    val waitingForLogin = loginState as? NcLoginFlow.State.Waiting
+    val working = busy || startingLogin || waitingForLogin != null || loginState is NcLoginFlow.State.Syncing
+
+    fun startLogin() {
+        startingLogin = true
+        result = null
+        scope.launch {
+            try {
+                context.openLoginPage(loginFlow.begin(server, folder))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                result = e.message ?: e.javaClass.simpleName
+            } finally {
+                startingLogin = false
+            }
+        }
+    }
+
     Text(
         "Gleicht abonnierte Feeds, gemerkte Artikel und Notizen über eine Datei in deiner Nextcloud ab. " +
             "Der Gelesen-Status wird nicht synchronisiert.",
@@ -317,28 +373,6 @@ private fun NextcloudSection(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
     )
-    OutlinedButton(
-        onClick = { scanning = true },
-        enabled = !busy,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-    ) {
-        Icon(AppIcons.QrCode, contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.size(8.dp))
-        Text("Mit QR-Code anmelden")
-    }
-    Text(
-        "In Nextcloud unter Persönliche Einstellungen → Sicherheit ein App-Passwort erstellen und den " +
-            "QR-Code anzeigen lassen. Oder die Daten unten von Hand eintragen.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-    )
-    if (scanning) {
-        QrLoginScanner(
-            onScanned = { scanning = false; apply(it) },
-            onDismiss = { scanning = false },
-        )
-    }
     OutlinedTextField(
         value = server,
         // The text of a login QR code pasted here is taken over directly.
@@ -346,9 +380,50 @@ private fun NextcloudSection(
         label = { Text("Server-Adresse") },
         placeholder = { Text("https://cloud.beispiel.de") },
         singleLine = true,
+        enabled = !working,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
         modifier = fieldModifier,
     )
+    FlowRow(
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Button(onClick = ::startLogin, enabled = !working && server.isNotBlank()) {
+            Text("Mit Nextcloud anmelden")
+        }
+        OutlinedButton(onClick = { scanning = true }, enabled = !working) {
+            Icon(AppIcons.QrCode, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.size(8.dp))
+            Text("Mit QR-Code anmelden")
+        }
+    }
+    if (waitingForLogin != null) {
+        Text(
+            "Bitte im Browser bei Nextcloud anmelden und „Zugriff gewähren“. Danach den Browser schließen – " +
+                "hier geht es automatisch weiter.",
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        )
+        Row(Modifier.padding(horizontal = 8.dp)) {
+            TextButton(onClick = { context.openLoginPage(waitingForLogin.loginUrl) }) { Text("Seite erneut öffnen") }
+            TextButton(onClick = loginFlow::cancel) { Text("Abbrechen") }
+        }
+    } else {
+        Text(
+            "„Mit Nextcloud anmelden“ öffnet die Anmeldeseite deiner Nextcloud; die App erhält dann ein eigenes " +
+                "App-Passwort. Für den QR-Code in Nextcloud unter Persönliche Einstellungen → Sicherheit ein " +
+                "App-Passwort erstellen. Oder Benutzer und App-Passwort unten von Hand eintragen.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        )
+    }
+    if (scanning) {
+        QrLoginScanner(
+            onScanned = { scanning = false; apply(it) },
+            onDismiss = { scanning = false },
+        )
+    }
     OutlinedTextField(
         value = user,
         onValueChange = { user = it },
@@ -386,10 +461,10 @@ private fun NextcloudSection(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Button(
-            enabled = !busy && server.isNotBlank() && user.isNotBlank() && password.isNotEmpty(),
+            enabled = !working && server.isNotBlank() && user.isNotBlank() && password.isNotEmpty(),
             onClick = ::saveAndSync,
         ) { Text("Speichern & jetzt synchronisieren") }
-        if (busy) {
+        if (busy || startingLogin || loginState is NcLoginFlow.State.Syncing) {
             Spacer(Modifier.size(12.dp))
             CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
         }
@@ -408,6 +483,15 @@ private fun NextcloudSection(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
         )
+    }
+}
+
+/** Opens the Nextcloud login page as a Custom Tab on top of the app (or in the browser). */
+private fun Context.openLoginPage(url: String) {
+    try {
+        CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(this, Uri.parse(url))
+    } catch (e: ActivityNotFoundException) {
+        Toast.makeText(this, "Kein Browser gefunden", Toast.LENGTH_LONG).show()
     }
 }
 
