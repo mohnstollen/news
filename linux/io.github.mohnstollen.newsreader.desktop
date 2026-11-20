@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=News
+GenericName=Feedreader
+GenericName[en]=Feed Reader
+Comment=RSS- und Atom-Feeds lesen und mit Nextcloud abgleichen
+Comment[en]=Read RSS and Atom feeds and sync them with Nextcloud
+Exec=newsreader
+Icon=io.github.mohnstollen.newsreader
+Terminal=false
+Categories=Network;News;Feed;GTK;
+Keywords=RSS;Atom;Feed;News;Nachrichten;Nextcloud;
+StartupNotify=true
+StartupWMClass=io.github.mohnstollen.newsreader

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.mohnstollen.newsreader</id>
+  <name>News</name>
+  <summary>RSS- und Atom-Feeds lesen und mit Nextcloud abgleichen</summary>
+  <summary xml:lang="en">Read RSS and Atom feeds and sync them with Nextcloud</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <description>
+    <p>Feedreader mit Ordnern, Schnellfiltern, Suche, Volltext, Notizen und gemerkten Artikeln.
+    Abonnements, gemerkte Artikel, Notizen und der Gelesen-Status lassen sich über die eigene
+    Nextcloud mit der Android-App abgleichen.</p>
+  </description>
+  <launchable type="desktop-id">io.github.mohnstollen.newsreader.desktop</launchable>
+  <url type="homepage">https://github.com/mohnstollen/news</url>
+  <url type="bugtracker">https://github.com/mohnstollen/news/issues</url>
+  <developer id="io.github.mohnstollen"><name>mohnstollen</name></developer>
+  <content_rating type="oars-1.1"/>
+</component>

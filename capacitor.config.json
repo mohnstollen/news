@@ -1,0 +1,15 @@
+{
+  "appId": "io.github.mohnstollen.newsreader",
+  "appName": "News",
+  "webDir": "www",
+  "backgroundColor": "#1a1311",
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_news",
+      "iconColor": "#E8590C"
+    }
+  }
+}

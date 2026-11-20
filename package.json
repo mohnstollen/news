@@ -1,0 +1,28 @@
+{
+  "name": "newsreader",
+  "version": "2.0.0",
+  "private": true,
+  "description": "RSS-/Atom-Reader – PWA, Android-App (Capacitor) und Linux-App (GTK/WebKitGTK)",
+  "license": "UNLICENSED",
+  "scripts": {
+    "vendor": "node scripts/vendor.mjs",
+    "build:web": "node scripts/build-web.mjs",
+    "sync": "npm run build:web && cap sync android",
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/browser": "8.0.5",
+    "@capacitor/core": "8.5.3",
+    "@capacitor/filesystem": "8.1.5",
+    "@capacitor/local-notifications": "8.0.2",
+    "@capacitor/share": "8.0.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.3",
+    "@mozilla/readability": "0.6.0",
+    "@playwright/test": "1.63.0",
+    "jsqr": "1.4.0"
+  }
+}

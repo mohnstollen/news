@@ -7,3 +7,10 @@ captures/
 .kotlin/
 *.apk
 *.jks
+
+# Web-App / Capacitor
+node_modules/
+www/
+test-results/
+playwright-report/
+dist/

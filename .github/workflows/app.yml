@@ -1,0 +1,170 @@
+name: App
+
+# Web-App (index.html) als Android-App (Capacitor) und Linux-Pakete (.deb/.rpm).
+# - Bei jedem Push: Tests, APK und Linux-Pakete als Workflow-Artefakte
+# - Auf main: zusätzlich ein GitHub-Release v<major>.<minor>.<Laufnummer> mit festen Download-Namen
+#   (newsreader.apk, newsreader.deb, newsreader.rpm)
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "index.html"
+      - "sw.js"
+      - "manifest.webmanifest"
+      - "icons/**"
+      - "vendor/**"
+      - "android/**"
+      - "linux/**"
+      - "scripts/**"
+      - "tests/**"
+      - "playwright.config.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - "capacitor.config.json"
+      - ".github/workflows/app.yml"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Abhängigkeiten installieren
+        run: npm ci
+      - name: Browser installieren
+        run: npx playwright install --with-deps chromium
+      - name: Tests ausführen
+        run: npm test
+      - name: Testergebnisse sichern (bei Fehlern)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-ergebnisse
+          path: test-results/
+          retention-days: 14
+
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.v.outputs.name }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          BASE=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")
+          RUN=${{ github.run_number }}
+          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            echo "name=$BASE.$RUN" >> "$GITHUB_OUTPUT"; echo "tag=v$BASE.$RUN" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=$BASE.$RUN-dev.${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"; echo "tag=" >> "$GITHUB_OUTPUT"
+          fi
+
+  apk:
+    needs: [test, version]
+    runs-on: ubuntu-latest
+    env:
+      VERSION_NAME: ${{ needs.version.outputs.name }}
+      VERSION_CODE: ${{ github.run_number }}
+      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Abhängigkeiten installieren
+        run: npm ci
+      - name: Web-App in das Android-Projekt übernehmen
+        run: npm run sync
+      # Ohne eigenen Schlüssel in den Secrets wird mit dem Schlüssel aus dem Repository signiert
+      - name: Eigenen Signier-Schlüssel bereitstellen
+        if: env.HAS_KEYSTORE == 'true'
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+      - name: APK bauen
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          ./gradlew --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/newsreader.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: newsreader-apk-${{ env.VERSION_NAME }}
+          path: ${{ runner.temp }}/newsreader.apk
+          if-no-files-found: error
+
+  linux:
+    needs: [test, version]
+    runs-on: ubuntu-latest
+    env:
+      VERSION_NAME: ${{ needs.version.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Werkzeuge installieren
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm xvfb xauth desktop-file-utils
+      - name: Pakete bauen
+        run: |
+          desktop-file-validate linux/io.github.mohnstollen.newsreader.desktop
+          bash linux/build.sh "$VERSION_NAME"
+          cp dist/newsreader_*_all.deb "$RUNNER_TEMP/newsreader.deb"
+          cp dist/newsreader-*.noarch.rpm "$RUNNER_TEMP/newsreader.rpm"
+      # Installiert das Paket samt Abhängigkeiten und prüft Feeds und Sync am laufenden Programm
+      - name: Paket installieren und testen
+        run: |
+          sudo apt-get install -y "$RUNNER_TEMP/newsreader.deb"
+          NEWSREADER_CMD=newsreader node linux/test.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: newsreader-linux-${{ env.VERSION_NAME }}
+          path: |
+            ${{ runner.temp }}/newsreader.deb
+            ${{ runner.temp }}/newsreader.rpm
+          if-no-files-found: error
+
+  release:
+    needs: [apk, linux, version]
+    if: needs.version.outputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: newsreader-*
+          merge-multiple: true
+          path: dateien
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: News ${{ needs.version.outputs.name }}
+          files: |
+            dateien/newsreader.apk
+            dateien/newsreader.deb
+            dateien/newsreader.rpm
+          generate_release_notes: true
+          make_latest: true
