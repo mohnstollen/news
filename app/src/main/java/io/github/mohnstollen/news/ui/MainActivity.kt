@@ -34,6 +34,7 @@ import androidx.navigation.navArgument
 import io.github.mohnstollen.news.AppContainer
 import io.github.mohnstollen.news.NewsApp
 import io.github.mohnstollen.news.widget.NewsWidget
+import io.github.mohnstollen.news.widget.WidgetSource
 import io.github.mohnstollen.news.work.Notifier
 import kotlinx.coroutines.launch
 
@@ -41,7 +42,14 @@ class MainActivity : ComponentActivity() {
     /** Article to open, as requested by a tap on the notification. */
     private val requestedArticle = mutableStateOf<Long?>(null)
 
+    /** Feed or folder to show, as requested by a tap on a widget's heading. */
+    private val requestedSource = mutableStateOf<WidgetSource?>(null)
+
     private fun readIntent(intent: Intent?) {
+        intent?.getStringExtra(NewsWidget.EXTRA_SOURCE)?.let {
+            requestedSource.value = WidgetSource.decode(it)
+            intent.removeExtra(NewsWidget.EXTRA_SOURCE)
+        }
         val id = intent?.getLongExtra(Notifier.EXTRA_ARTICLE_ID, -1L) ?: -1L
         if (id > 0) {
             requestedArticle.value = id
@@ -74,13 +82,29 @@ class MainActivity : ComponentActivity() {
         setContent {
             NewsTheme {
                 val nav = rememberNavController()
+                // Shared by all destinations, so list scope and filters survive navigation.
+                val mainViewModel: MainViewModel = viewModel()
                 LaunchedEffect(requestedArticle.value) {
                     val id = requestedArticle.value ?: return@LaunchedEffect
                     requestedArticle.value = null
                     nav.navigate("reader/$id") { launchSingleTop = true }
                 }
-                // Shared by all destinations, so list scope and filters survive navigation.
-                val mainViewModel: MainViewModel = viewModel()
+                LaunchedEffect(requestedSource.value) {
+                    val source = requestedSource.value ?: return@LaunchedEffect
+                    requestedSource.value = null
+                    when (source) {
+                        WidgetSource.All -> {
+                            mainViewModel.select(MainViewModel.ListScope.All)
+                            mainViewModel.setFolder(null)
+                        }
+                        is WidgetSource.Folder -> {
+                            mainViewModel.select(MainViewModel.ListScope.All)
+                            mainViewModel.setFolder(source.name)
+                        }
+                        is WidgetSource.Feed -> mainViewModel.select(MainViewModel.ListScope.Single(source.id))
+                    }
+                    nav.popBackStack("list", inclusive = false)
+                }
                 NavHost(nav, startDestination = "list") {
                     composable("list") {
                         ArticleListScreen(
