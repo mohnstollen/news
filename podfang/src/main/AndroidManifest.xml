@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Podfang, the podcast app: no home screen widget (it lists unread articles). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:name="io.github.mohnstollen.podfang.PodfangApp"
+        tools:replace="android:name">
+
+        <receiver android:name="io.github.mohnstollen.news.widget.NewsWidgetProvider" tools:node="remove" />
+        <service android:name="io.github.mohnstollen.news.widget.WidgetService" tools:node="remove" />
+        <activity android:name="io.github.mohnstollen.news.widget.WidgetConfigActivity" tools:node="remove" />
+    </application>
+</manifest>
