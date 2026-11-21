@@ -35,6 +35,10 @@ data class ParsedItem(
     val durationSeconds: Long? = null,
     /** Artwork of this entry, if it has its own. */
     val imageUrl: String? = null,
+    /** Podlove Simple Chapters given in the feed. */
+    val chapters: List<Chapter> = emptyList(),
+    /** Podcasting 2.0 chapters file, loaded when the episode is played. */
+    val chaptersUrl: String? = null,
 )
 
 data class ParsedEnclosure(
@@ -85,6 +89,8 @@ object FeedParser {
                 duration = item.childText("itunes:duration")?.let(DurationParser::parse)
                     ?: mediaContents.firstNotNullOfOrNull { DurationParser.parse(it.attr("duration")) },
                 image = rssItemImage(item, mediaContents, baseUrl),
+                chapters = pscChapters(item),
+                chaptersUrl = item.child("podcast:chapters")?.attr("url")?.let { httpUrl(baseUrl, it) },
             )
         }
         return ParsedFeed(
@@ -144,6 +150,8 @@ object FeedParser {
                     .firstNotNullOfOrNull { playable(baseUrl, it.attr("href"), it.attr("type"), it.attr("length")) },
                 duration = entry.childText("itunes:duration")?.let(DurationParser::parse),
                 image = entry.child("itunes:image")?.attr("href")?.let { httpUrl(baseUrl, it) },
+                chapters = pscChapters(entry),
+                chaptersUrl = entry.child("podcast:chapters")?.attr("url")?.let { httpUrl(baseUrl, it) },
             )
         }
         return ParsedFeed(
@@ -152,6 +160,14 @@ object FeedParser {
             items = items,
             imageUrl = listOf(feed.child("itunes:image")?.attr("href"), feed.childText("logo"), feed.childText("icon"))
                 .firstNotNullOfOrNull { it?.let { url -> httpUrl(baseUrl, url) } },
+        )
+    }
+
+    /** Podlove Simple Chapters: `<psc:chapters><psc:chapter start="00:01:30.000" title="…"/>`. */
+    private fun pscChapters(item: Element): List<Chapter> {
+        val list = item.child("psc:chapters")?.children("psc:chapter") ?: return emptyList()
+        return Chapters.clean(
+            list.mapNotNull { c -> Chapters.parseTime(c.attr("start"))?.let { Chapter(it, c.attr("title").trim()) } },
         )
     }
 
@@ -190,6 +206,8 @@ object FeedParser {
         enclosure: ParsedEnclosure? = null,
         duration: Long? = null,
         image: String? = null,
+        chapters: List<Chapter> = emptyList(),
+        chaptersUrl: String? = null,
     ): ParsedItem? {
         val cleanHtml = html?.trim()?.takeIf { it.isNotEmpty() }
         val finalTitle = title?.takeIf { it.isNotBlank() }
@@ -206,6 +224,8 @@ object FeedParser {
             enclosure = enclosure,
             durationSeconds = duration,
             imageUrl = image,
+            chapters = chapters,
+            chaptersUrl = chaptersUrl,
         )
     }
 

@@ -443,6 +443,27 @@ class RepositoryTest {
     }
 
     @Test
+    fun episodesStoredBeforeGetTheirChapters() = runBlocking {
+        val d = device()
+        fun feed(chapters: Boolean) =
+            "<rss version=\"2.0\" xmlns:psc=\"http://podlove.org/simple-chapters\"><channel><title>K</title>" +
+                "<item><guid>k1</guid><title>Folge</title><enclosure url=\"${url("/k1.mp3")}\" type=\"audio/mpeg\"/>" +
+                (if (chapters) "<psc:chapters><psc:chapter start=\"00:00:00\" title=\"Anfang\"/>" +
+                    "<psc:chapter start=\"00:10:00\" title=\"Mitte\"/></psc:chapters>" else "") +
+                "</item></channel></rss>"
+        serve("/k.xml", feed(chapters = false))
+        val f = d.repo.addFeed(url("/k.xml"), null)
+        assertNull(d.repo.articleDao.byGuid(f.id, "k1")!!.chapters)
+        serve("/k.xml", feed(chapters = true))
+        d.repo.refresh(f.id)
+        val chapters = io.github.mohnstollen.news.data.Chapters.decode(d.repo.articleDao.byGuid(f.id, "k1")!!.chapters)
+        assertEquals(listOf("Anfang", "Mitte"), chapters.map { it.title })
+        // Chapters found later (file, player) do not replace those of the feed.
+        d.repo.articleDao.setChaptersIfMissing(d.repo.articleDao.byGuid(f.id, "k1")!!.id, "[]")
+        assertEquals(2, io.github.mohnstollen.news.data.Chapters.decode(d.repo.articleDao.byGuid(f.id, "k1")!!.chapters).size)
+    }
+
+    @Test
     fun aVeryLargeFeedIsCutInsteadOfRefused() = runBlocking {
         val d = device()
         // About 12 MB: 600 episodes with long show notes, newest first.

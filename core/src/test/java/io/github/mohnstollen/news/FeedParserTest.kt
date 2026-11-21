@@ -288,4 +288,38 @@ class FeedParserTest {
         assertNull(MediaTypes.fromUrl("https://example.mp3/download"))
         assertTrue(MediaTypes.isPlayable("application/ogg"))
     }
+
+    @Test
+    fun chaptersFromTheFeed() {
+        val feed = parse(
+            """
+            <rss version="2.0" xmlns:psc="http://podlove.org/simple-chapters" xmlns:podcast="https://podcastindex.org/namespace/1.0">
+              <channel><title>Kapitel</title>
+                <item>
+                  <title>Mit Podlove-Kapiteln</title>
+                  <enclosure url="https://example.org/a.mp3" type="audio/mpeg"/>
+                  <psc:chapters version="1.2">
+                    <psc:chapter start="00:12:30.500" title="Zweites Thema"/>
+                    <psc:chapter start="00:00:00.000" title="Begrüßung"/>
+                    <psc:chapter start="1:02:03" title=""/>
+                    <psc:chapter start="kaputt" title="Ohne Zeit"/>
+                  </psc:chapters>
+                </item>
+                <item>
+                  <title>Mit Kapitel-Datei</title>
+                  <enclosure url="https://example.org/b.mp3" type="audio/mpeg"/>
+                  <podcast:chapters url="/b-chapters.json" type="application/json+chapters"/>
+                </item>
+              </channel>
+            </rss>
+            """.trimIndent(),
+        )
+        val chapters = feed.items[0].chapters
+        assertEquals(listOf(0L, 750_500L, 3_723_000L), chapters.map { it.startMs })
+        assertEquals(listOf("Begrüßung", "Zweites Thema", "Kapitel 3"), chapters.map { it.title })
+        assertNull(feed.items[0].chaptersUrl)
+        assertEquals("https://example.org/b-chapters.json", feed.items[1].chaptersUrl)
+        assertTrue(feed.items[1].chapters.isEmpty())
+    }
+
 }

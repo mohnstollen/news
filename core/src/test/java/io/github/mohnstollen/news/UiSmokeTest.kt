@@ -15,6 +15,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.swipeDown
@@ -546,7 +547,7 @@ class EpisodeUiTest : UiTestBase() {
             waitFor("Geschwindigkeit")
             compose.onNodeWithText("1,5×").performClick()
             eventually("speed") { context.container.settings.current.playbackSpeed == 1.5f }
-            compose.onNodeWithText("Beenden").performClick()
+            compose.onNodeWithText("Beenden").performScrollTo().performClick()
             eventually("mini player gone") { compose.onAllNodesWithText("Folge Eins").fetchSemanticsNodes().size == 1 }
 
             // In the reader: mark as played, which also counts as read.
@@ -718,17 +719,82 @@ class ReaderModeUiTest : UiTestBase() {
     }
 }
 
-@Config(application = PodfangTestApp::class, sdk = [34])
+// A common phone size, so the screenshots show what a phone shows.
+@Config(application = PodfangTestApp::class, sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
 class PodfangModeUiTest : UiTestBase() {
+    /** For looking at the layout: written to the build folder. */
+    private fun screenshot(name: String) {
+        compose.waitForIdle()
+        val view = compose.activity.window.decorView
+        val bitmap = android.graphics.Bitmap.createBitmap(view.width, view.height, android.graphics.Bitmap.Config.ARGB_8888)
+        compose.runOnUiThread { view.draw(android.graphics.Canvas(bitmap)) }
+        val dir = java.io.File("build/screenshots").apply { mkdirs() }
+        java.io.FileOutputStream(java.io.File(dir, "$name.png")).use {
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
+    }
+
     @Test(timeout = 120000)
-    fun podfangUsesItsNameWordingAndFolder() {
+    fun podfangHasTabsPodcastWordsAndItsOwnFolder() {
+        val episode = runBlocking {
+            val feedId = repo.feedDao.all().first().id
+            val file = java.io.File(context.filesDir, "geladen.mp3").apply { writeText("x") }
+            repo.articleDao.insertAll(
+                listOf(
+                    Article(
+                        feedId = feedId, guid = "dl", title = "Geladene Folge", pubDate = System.currentTimeMillis(),
+                        fetchedAt = 0, enclosureUrl = "https://example.org/dl.mp3", durationSeconds = 1800,
+                        downloadPath = file.path,
+                    ),
+                ),
+            ).single().also { repo.enqueue(it) }
+        }
         waitFor("Alle Folgen")
+        // The test data is called "Artikel Nummer …"; the app's own words must not be reader words.
+        assertTrue(compose.onAllNodesWithText("Alle Artikel").fetchSemanticsNodes().isEmpty())
+        assertTrue(compose.onAllNodesWithText("Ungelesen").fetchSemanticsNodes().isEmpty())
+        compose.onNodeWithText("Offen").assertIsDisplayed()
+        screenshot("podfang-folgen")
+
+        // The menu: no queue or settings there, they have tabs.
         compose.onNodeWithContentDescription("Podcasts anzeigen").performClick()
         waitFor("Podfang")
-        compose.onNodeWithText("Warteschlange").assertIsDisplayed()
+        assertTrue(compose.onAllNodesWithText("Einstellungen").fetchSemanticsNodes().size == 1)
+        compose.onNode(hasScrollToNodeAction() and hasAnyDescendant(hasText("Gemerkt")))
+            .performScrollToNode(hasText("Podcasts entdecken"))
         openFromDrawer("Podcasts verwalten")
-        waitFor("Podcasts")
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Podcast hinzufügen", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithContentDescription("Zurück").performClick()
+
+        // Queue tab: length per episode and in total.
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Warteschlange").fetchSemanticsNodes().isNotEmpty() }
+        compose.onAllNodesWithText("Warteschlange").onFirst().performClick()
+        waitFor("1 Folge · 30 Min verbleibend")
+        assertTrue("a tab has no back arrow", compose.onAllNodesWithContentDescription("Zurück").fetchSemanticsNodes().isEmpty())
+        screenshot("podfang-warteschlange")
+
+        // Downloads tab: the downloaded episode, with the total.
+        compose.onNodeWithText("Downloads").performClick()
+        waitFor("Geladene Folge")
+        waitFor("1 Folge · 30 Min")
+        screenshot("podfang-downloads")
+
+        // Settings tab: podcast settings, no widget, no full text.
+        compose.onAllNodesWithText("Einstellungen").onFirst().performClick()
+        waitFor("Intervall in Minuten")
+        assertTrue(compose.onAllNodesWithText("Widget").fetchSemanticsNodes().isEmpty())
         assertEquals("own Nextcloud folder", "Podfang", context.container.settings.current.ncFolder)
         assertEquals("Podfang (Android)", context.container.features.clientName)
+
+        // Back to the episodes; the reader offers no full text.
+        compose.onNode(hasText("Podcasts") and hasClickAction()).performClick()
+        waitFor("Geladene Folge")
+        compose.onNodeWithText("Geladene Folge").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("Archivieren").fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(compose.onAllNodesWithContentDescription("Volltext laden").fetchSemanticsNodes().isEmpty())
+        assertTrue("no tabs on an episode", compose.onAllNodesWithText("Downloads").fetchSemanticsNodes().isEmpty())
+        assertEquals(episode, runBlocking { repo.queueDao.ids() }.single())
     }
 }

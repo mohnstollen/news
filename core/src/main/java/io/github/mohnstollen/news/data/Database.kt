@@ -92,6 +92,10 @@ data class Article(
     val downloadPath: String? = null,
     /** When it was archived (left out of the lists); 0 if not archived. */
     @ColumnInfo(defaultValue = "0") val archivedAt: Long = 0,
+    /** Chapters as JSON, see [Chapters]; null while none are known. */
+    val chapters: String? = null,
+    /** Podcasting 2.0 chapters file, loaded when the episode is played. */
+    val chaptersUrl: String? = null,
 )
 
 /** Full-text index over the searchable columns of [Article]; Room keeps it in sync. */
@@ -520,6 +524,19 @@ interface ArticleDao {
     )
     fun observeDownloaded(): Flow<List<DownloadedEpisode>>
 
+    /** Only where none are known yet: chapters from the feed win over those found later. */
+    @Query("UPDATE articles SET chapters = :chapters WHERE id = :id AND chapters IS NULL")
+    suspend fun setChaptersIfMissing(id: Long, chapters: String)
+
+    @Query("SELECT guid FROM articles WHERE feedId = :feedId AND chapters IS NULL AND chaptersUrl IS NULL")
+    suspend fun guidsWithoutChapters(feedId: Long): List<String>
+
+    @Query(
+        "UPDATE articles SET chapters = COALESCE(chapters, :chapters), chaptersUrl = COALESCE(chaptersUrl, :chaptersUrl) " +
+            "WHERE feedId = :feedId AND guid = :guid",
+    )
+    suspend fun backfillChapters(feedId: Long, guid: String, chapters: String?, chaptersUrl: String?)
+
     @Query("UPDATE articles SET playPosition = :positionMs WHERE id = :id")
     suspend fun setPlayPosition(id: Long, positionMs: Long)
 
@@ -552,7 +569,7 @@ interface ArticleDao {
     entities = [
         Feed::class, Article::class, DeletedFeed::class, ArticleFts::class, QueueEntry::class, ListenEntry::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -621,7 +638,15 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+        /** Chapters of episodes. */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE articles ADD COLUMN chapters TEXT")
+                db.execSQL("ALTER TABLE articles ADD COLUMN chaptersUrl TEXT")
+            }
+        }
+
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
     }
 }
 

@@ -52,6 +52,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.mohnstollen.news.playback.DownloadProgress
+import io.github.mohnstollen.news.data.Chapter
+import io.github.mohnstollen.news.data.Chapters
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import io.github.mohnstollen.news.playback.Episodes
 import io.github.mohnstollen.news.playback.PlayerConnection
 import io.github.mohnstollen.news.playback.PlayerState
@@ -180,11 +184,24 @@ private fun PlayerSheet(
 ) {
     // While the thumb is dragged, show where it is instead of where playback is.
     var dragging by remember { mutableStateOf<Float?>(null) }
+    val chapters = rememberChapters(state.articleId)
+    val currentChapter = Chapters.current(chapters, state.positionMs)
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp)) {
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 24.dp),
+        ) {
             Text(state.title, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
             if (state.subtitle.isNotBlank()) {
                 Text(state.subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            chapters.getOrNull(currentChapter)?.let {
+                Text(
+                    "Kapitel ${currentChapter + 1}/${chapters.size}: ${it.title}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
             state.error?.let {
                 Spacer(Modifier.height(8.dp))
@@ -248,6 +265,10 @@ private fun PlayerSheet(
             }
 
             Spacer(Modifier.height(8.dp))
+            if (chapters.isNotEmpty()) {
+                ChapterList(chapters, currentChapter, state.positionMs, player)
+                Spacer(Modifier.height(8.dp))
+            }
             SleepTimerChips(player)
 
             val queue by player.queue.collectAsStateWithLifecycle(emptyList())
@@ -277,6 +298,59 @@ private fun PlayerSheet(
                     Text("Beenden")
                 }
             }
+        }
+    }
+}
+
+/** Chapters of the episode, from the database; they can arrive while it plays. */
+@Composable
+private fun rememberChapters(articleId: Long?): List<Chapter> {
+    if (articleId == null) return emptyList()
+    val repo = androidx.compose.ui.platform.LocalContext.current.container.repository
+    val article by remember(articleId) { repo.articleDao.observe(articleId) }.collectAsStateWithLifecycle(null)
+    val json = article?.chapters
+    return remember(json) { Chapters.decode(json) }
+}
+
+@Composable
+private fun ChapterList(chapters: List<Chapter>, current: Int, positionMs: Long, player: PlayerConnection) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Kapitel", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+        // Back goes to the start of the chapter; a few seconds in, to the one before.
+        TextButton(
+            onClick = {
+                val start = chapters.getOrNull(current)?.startMs ?: 0
+                val target = if (positionMs - start > 3_000 || current <= 0) start else chapters[current - 1].startMs
+                player.seekTo(target)
+            },
+        ) { Text("Vorheriges") }
+        TextButton(
+            onClick = { chapters.getOrNull(current + 1)?.let { player.seekTo(it.startMs) } },
+            enabled = current + 1 < chapters.size,
+        ) { Text("Nächstes") }
+    }
+    chapters.forEachIndexed { i, chapter ->
+        val playing = i == current
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+                .clickable(onClickLabel = "Zu diesem Kapitel springen") { player.seekTo(chapter.startMs) }
+                .padding(vertical = 6.dp),
+        ) {
+            Text(
+                Episodes.clock(chapter.startMs),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(64.dp),
+            )
+            Text(
+                chapter.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (playing) androidx.compose.ui.text.font.FontWeight.SemiBold else null,
+                color = if (playing) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

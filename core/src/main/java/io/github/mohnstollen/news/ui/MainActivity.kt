@@ -17,6 +17,21 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -120,7 +135,11 @@ class MainActivity : ComponentActivity() {
                     }
                     nav.popBackStack("list", inclusive = false)
                 }
-                NavHost(nav, startDestination = "list") {
+                val tabs = container.features.tabs
+                // A tab is shown without a back arrow; opened from the menu, a screen has one.
+                fun backOrTab(): (() -> Unit)? = if (tabs) null else ({ nav.popBackStack() })
+                TabScaffold(nav, enabled = tabs) { modifier ->
+                NavHost(nav, startDestination = "list", modifier = modifier) {
                     composable("list") {
                         ArticleListScreen(
                             vm = mainViewModel,
@@ -138,15 +157,76 @@ class MainActivity : ComponentActivity() {
                     }
                     composable("feeds") { FeedsScreen(onBack = { nav.popBackStack() }) }
                     composable("queue") {
-                        QueueScreen(onBack = { nav.popBackStack() }, onOpenArticle = { nav.navigate("reader/$it") })
+                        QueueScreen(onBack = backOrTab(), onOpenArticle = { nav.navigate("reader/$it") })
+                    }
+                    composable("downloads") {
+                        DownloadsScreen(onBack = backOrTab(), onOpenArticle = { nav.navigate("reader/$it") })
                     }
                     composable("stats") { StatsScreen(onBack = { nav.popBackStack() }) }
                     composable("discover") { DiscoverScreen(onBack = { nav.popBackStack() }) }
-                    composable("settings") { SettingsScreen(onBack = { nav.popBackStack() }) }
+                    composable("settings") { SettingsScreen(onBack = backOrTab()) }
+                }
                 }
               }
             }
         }
+    }
+}
+
+private data class Tab(val route: String, val label: String, val icon: ImageVector)
+
+/**
+ * With [enabled], a bar of tabs at the bottom while one of the tab screens is shown; other screens
+ * (an episode, statistics, …) cover the whole height. [content] gets the modifier for its padding.
+ */
+@Composable
+private fun TabScaffold(
+    nav: androidx.navigation.NavHostController,
+    enabled: Boolean,
+    content: @Composable (Modifier) -> Unit,
+) {
+    if (!enabled) {
+        content(Modifier)
+        return
+    }
+    val tabs = remember {
+        listOf(
+            Tab("list", "Podcasts", Icons.AutoMirrored.Filled.List),
+            Tab("queue", "Warteschlange", AppIcons.QueueAdd),
+            Tab("downloads", "Downloads", AppIcons.Download),
+            Tab("settings", "Einstellungen", Icons.Default.Settings),
+        )
+    }
+    val entry by nav.currentBackStackEntryAsState()
+    val route = entry?.destination?.route
+    val onTab = tabs.any { it.route == route }
+    Scaffold(
+        // The screens inside handle the status bar themselves.
+        contentWindowInsets = WindowInsets(0),
+        bottomBar = {
+            if (onTab) {
+                NavigationBar {
+                    tabs.forEach { tab ->
+                        NavigationBarItem(
+                            selected = route == tab.route,
+                            onClick = {
+                                nav.navigate(tab.route) {
+                                    // One copy of each tab, and the back button leads to the episodes.
+                                    popUpTo("list") { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            },
+                            icon = { Icon(tab.icon, contentDescription = null) },
+                            label = { Text(tab.label, maxLines = 1) },
+                        )
+                    }
+                }
+            }
+        },
+    ) { padding ->
+        // The bar takes the navigation bar's space; the screens must not add it again.
+        content(Modifier.padding(padding).consumeWindowInsets(padding))
     }
 }
 

@@ -961,7 +961,8 @@ private fun FeedDrawer(
                     modifier = itemPadding,
                 )
             }
-            if (features.podcasts) item {
+            // With tabs, the queue and the settings have their own tab.
+            if (features.podcasts && !features.tabs) item {
                 NavigationDrawerItem(
                     label = { Text("Warteschlange") },
                     icon = { Icon(AppIcons.QueueAdd, contentDescription = null) },
@@ -1021,7 +1022,7 @@ private fun FeedDrawer(
                     modifier = itemPadding,
                 )
             }
-            item {
+            if (!features.tabs) item {
                 NavigationDrawerItem(
                     label = { Text("Einstellungen") },
                     icon = { Icon(Icons.Default.Settings, contentDescription = null) },

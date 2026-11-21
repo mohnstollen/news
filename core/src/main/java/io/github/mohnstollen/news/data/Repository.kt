@@ -143,6 +143,8 @@ class Repository(
                 enclosureLength = item.enclosure?.length,
                 durationSeconds = item.durationSeconds,
                 imageUrl = item.imageUrl,
+                chapters = item.chapters.takeIf { it.isNotEmpty() }?.let(Chapters::encode),
+                chaptersUrl = item.chaptersUrl,
             )
         }
         val retention = settings.current.retentionDays
@@ -154,6 +156,15 @@ class Repository(
             if (missing.isNotEmpty()) {
                 articles.filter { it.guid in missing && it.content != null }.forEach {
                     articleDao.backfillContent(feed.id, it.guid, it.content, it.summary)
+                }
+            }
+
+            // Episodes stored before chapters were read get them now.
+            val withChapters = articles.filter { it.chapters != null || it.chaptersUrl != null }
+            if (withChapters.isNotEmpty()) {
+                val noChapters = articleDao.guidsWithoutChapters(feed.id).toSet()
+                withChapters.filter { it.guid in noChapters }.forEach {
+                    articleDao.backfillChapters(feed.id, it.guid, it.chapters, it.chaptersUrl)
                 }
             }
 

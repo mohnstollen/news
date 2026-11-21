@@ -9,6 +9,11 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
+import androidx.media3.extractor.metadata.id3.ChapterFrame
+import androidx.media3.extractor.metadata.id3.TextInformationFrame
+import io.github.mohnstollen.news.data.Chapter
+import io.github.mohnstollen.news.data.Chapters
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
@@ -212,7 +217,14 @@ class PlaybackService : MediaSessionService() {
             }
         }
 
+        override fun onTracksChanged(tracks: Tracks) {
+            val id = currentArticleId() ?: return
+            val chapters = id3Chapters(tracks).takeIf { it.isNotEmpty() } ?: return
+            repo.scope.launch { repo.articleDao.setChaptersIfMissing(id, Chapters.encode(chapters)) }
+        }
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            currentArticleId()?.let(::loadLinkedChapters)
             // Time so far belongs to the previous episode.
             logListening()
             listeningId = if (session?.player?.isPlaying == true) currentArticleId() else null
@@ -242,6 +254,40 @@ class PlaybackService : MediaSessionService() {
                 container.settings.update { it.copy(playbackSpeed = speed) }
             }
         }
+    }
+
+    /** Podcasting 2.0: the feed links a JSON file with the chapters; loaded once, when played. */
+    private fun loadLinkedChapters(articleId: Long) {
+        val http = container.http
+        repo.scope.launch {
+            val article = repo.articleDao.byId(articleId) ?: return@launch
+            val url = article.chaptersUrl ?: return@launch
+            if (article.chapters != null) return@launch
+            val chapters = runCatching {
+                http.newCall(okhttp3.Request.Builder().url(url).build()).execute().use { response ->
+                    if (!response.isSuccessful) return@use emptyList()
+                    Chapters.parseJson(response.body?.string().orEmpty())
+                }
+            }.getOrDefault(emptyList())
+            if (chapters.isNotEmpty()) repo.articleDao.setChaptersIfMissing(articleId, Chapters.encode(chapters))
+        }
+    }
+
+    /** ID3 chapter frames (CHAP) in an MP3 file, as the player found them. */
+    private fun id3Chapters(tracks: Tracks): List<Chapter> {
+        val found = mutableListOf<Chapter>()
+        for (group in tracks.groups) {
+            for (i in 0 until group.length) {
+                val metadata = group.getTrackFormat(i).metadata ?: continue
+                for (j in 0 until metadata.length()) {
+                    val frame = metadata.get(j) as? ChapterFrame ?: continue
+                    val title = (0 until frame.subFrameCount).map { frame.getSubFrame(it) }
+                        .filterIsInstance<TextInformationFrame>().firstOrNull { it.id == "TIT2" }?.values?.firstOrNull()
+                    found += Chapter(frame.startTimeMs.toLong(), title.orEmpty())
+                }
+            }
+        }
+        return Chapters.clean(found)
     }
 
     /** Many feeds do not state the length; the player knows it once the file is open. */

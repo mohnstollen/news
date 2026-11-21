@@ -112,4 +112,78 @@ class RecommendationsTest {
 
         assertEquals(listOf("Bundesliga Talk"), recommender.search("Bundesliga").map { it.title }.filter { it.endsWith("Talk") })
     }
+
+    @Test
+    fun releaseRhythm() {
+        val day = 24 * 60 * 60 * 1000L
+        fun every(days: Double, n: Int = 10) = (0 until n).map { (it * days * day).toLong() }
+        assertEquals("etwa täglich", io.github.mohnstollen.news.data.Rhythm.describe(every(1.0)))
+        assertEquals("mehrmals pro Woche", io.github.mohnstollen.news.data.Rhythm.describe(every(3.0)))
+        assertEquals("etwa wöchentlich", io.github.mohnstollen.news.data.Rhythm.describe(every(7.0)))
+        assertEquals("etwa alle zwei Wochen", io.github.mohnstollen.news.data.Rhythm.describe(every(14.0)))
+        assertEquals("etwa monatlich", io.github.mohnstollen.news.data.Rhythm.describe(every(30.0)))
+        assertEquals("selten", io.github.mohnstollen.news.data.Rhythm.describe(every(90.0)))
+        assertEquals(null, io.github.mohnstollen.news.data.Rhythm.describe(every(7.0, n = 2)))
+        // One long summer break does not change a weekly show.
+        assertEquals("etwa wöchentlich", io.github.mohnstollen.news.data.Rhythm.describe(every(7.0, 8) + listOf(-60 * day)))
+    }
+
+    @Test
+    fun previewAndSuggestionsForOnePodcast() = runBlocking {
+        val format = java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME.withLocale(java.util.Locale.ENGLISH)
+        fun date(daysAgo: Long) = format.format(java.time.ZonedDateTime.now(java.time.ZoneOffset.UTC).minusDays(daysAgo))
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.requestUrl!!.encodedPath
+                if (path == "/neu.xml") {
+                    val items = (0 until 12).joinToString("") {
+                        "<item><title>Folge ${12 - it}</title><pubDate>${date(it * 7L + 2)}</pubDate>" +
+                            "<itunes:duration>45:00</itunes:duration></item>"
+                    }
+                    return MockResponse().setBody(
+                        "<rss version=\"2.0\" xmlns:itunes=\"http://www.itunes.com/dtds/podcast-1.0.dtd\"><channel>" +
+                            "<title>Neuer Podcast</title>$items</channel></rss>",
+                    )
+                }
+                val term = request.requestUrl!!.queryParameter("term").orEmpty()
+                terms += term
+                return MockResponse().setBody(
+                    when (term) {
+                        "Zweiter" -> results(podcast("Zweiter", "https://example.org/zwei.xml", "1310", "Music"))
+                        "Konzert" -> results(podcast("Konzert-Talk", server.url("/neu.xml").toString(), "1310", "Music"))
+                        else -> results()
+                    },
+                )
+            }
+        }
+        server.start()
+        val http = newHttpClient()
+        val repo = Repository(db, FeedFetcher(http), FullTextExtractor(http), SettingsStore(context))
+        val first = repo.feedDao.insert(Feed(url = "https://example.org/eins.xml", title = "Erster"))
+        val second = repo.feedDao.insert(Feed(url = "https://example.org/zwei.xml", title = "Zweiter"))
+        for ((feedId, word) in listOf(first to "Sport", second to "Konzert")) {
+            repo.articleDao.insertAll(
+                (1..3).map {
+                    Article(feedId = feedId, guid = "$word$it", title = "$word Nummer $it", pubDate = it.toLong(), fetchedAt = 0,
+                        enclosureUrl = "https://example.org/$word$it.mp3")
+                },
+            )
+        }
+        val recommender = Recommender(http, repo, baseUrl = server.url("/"), country = "DE")
+        assertEquals(setOf("Erster", "Zweiter"), recommender.seeds().map { it.title }.toSet())
+
+        // Only the chosen podcast is looked up.
+        val suggestions = recommender.recommend(seedFeedId = second)
+        assertEquals(listOf("Konzert-Talk"), suggestions.map { it.podcast.title })
+        assertTrue(terms.none { it == "Erster" || it == "Sport" })
+
+        val preview = recommender.preview(suggestions.single().podcast)
+        assertEquals("Neuer Podcast", preview.title)
+        assertEquals(12, preview.episodeCount)
+        assertEquals("etwa wöchentlich", preview.rhythm)
+        assertEquals(10, preview.latest.size)
+        assertEquals("Folge 12", preview.latest.first().title)
+        assertEquals(2700L, preview.latest.first().durationSeconds)
+        assertEquals("vor 2 Tagen", io.github.mohnstollen.news.ui.daysAgo(preview.latest.first().pubDate))
+    }
 }

@@ -73,6 +73,16 @@ class EpisodesTest {
     }
 
     @Test
+    fun timeLeftInAList() {
+        val (left, unknown) = Episodes.remaining(listOf(1800L to 600_000L, 3600L to 0L, null to 0L, 600L to 700_000L))
+        assertEquals("20 + 60 + 0 minutes", 80 * 60_000L, left)
+        assertEquals(1, unknown)
+        assertEquals("1:20 Std", Episodes.total(left))
+        assertEquals("45 Min", Episodes.total(45 * 60_000L))
+        assertEquals("12:34 Std", Episodes.total((12 * 60 + 34) * 60_000L))
+    }
+
+    @Test
     fun endBuffer() {
         val hour = 3_600_000L
         assertFalse("off", Episodes.inEndBuffer(hour - 1_000, hour, 0))
@@ -118,5 +128,19 @@ class EpisodesTest {
         } finally {
             db.close()
         }
+    }
+
+    @Test
+    fun chapterFilesAndHelpers() {
+        val json = """{"version":"1.2.0","chapters":[{"startTime":95.5,"title":"Teil 2"},{"startTime":0,"title":"Intro"},{"title":"ohne Zeit"}]}"""
+        val chapters = io.github.mohnstollen.news.data.Chapters.parseJson(json)
+        assertEquals(listOf(0L, 95_500L), chapters.map { it.startMs })
+        val stored = io.github.mohnstollen.news.data.Chapters.encode(chapters)
+        assertEquals(chapters, io.github.mohnstollen.news.data.Chapters.decode(stored))
+        assertTrue(io.github.mohnstollen.news.data.Chapters.decode(null).isEmpty())
+        assertTrue(io.github.mohnstollen.news.data.Chapters.decode("kaputt").isEmpty())
+        assertEquals(-1, io.github.mohnstollen.news.data.Chapters.current(listOf(io.github.mohnstollen.news.data.Chapter(5_000, "a")), 1_000))
+        assertEquals(1, io.github.mohnstollen.news.data.Chapters.current(chapters, 100_000))
+        assertEquals(0, io.github.mohnstollen.news.data.Chapters.current(chapters, 95_499))
     }
 }

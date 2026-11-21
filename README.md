@@ -38,6 +38,8 @@ sie nicht brauchen.
   lässt sich pro Eintrag laden oder pro Feed automatisch bei jedem Update
 - **Aktualisierung** im Hintergrund in einstellbarem Intervall (Standard 60 Minuten, auf Wunsch
   nur im WLAN) oder nur manuell
+- **Große Feeds** (langjährige Podcasts) werden bis 10 MB gelesen; reicht das nicht, fehlen die
+  ältesten Einträge
 - **Suche** über Titel, Text, Volltext und Notizen
 - **Benachrichtigung** bei Neuem nach einem Hintergrund-Update (abschaltbar, auch pro Feed)
 - **OPML** Import und Export
@@ -52,6 +54,11 @@ sie nicht brauchen.
 
 ## Nur Podfang
 
+- **Tabs** unten: Podcasts, Warteschlange, Downloads, Einstellungen. Statistik, Podcasts entdecken und
+  die Podcast-Verwaltung liegen im Menü der Podcasts-Ansicht
+- **Kapitel** im Player: aus dem Feed (Podlove Simple Chapters), aus einer verlinkten Kapiteldatei
+  (Podcasting 2.0) oder aus der MP3-Datei (ID3); aktuelles Kapitel, Liste zum Springen, vorheriges
+  und nächstes Kapitel
 - **Wiedergabe** im Hintergrund mit Mini-Player, Player mit Positionsregler und Geschwindigkeit
   (0,8× bis 2×, auch direkt in der Folge umschaltbar), 10 s zurück / 30 s vor, Steuerung über
   Benachrichtigung, Sperrbildschirm, Kopfhörer und Bluetooth. Jede Folge merkt sich, wo sie aufgehört
@@ -63,14 +70,20 @@ sie nicht brauchen.
   überspringen“: die letzten 10 bis 120 Sekunden zählen als gehört); Belegung und „Alle löschen“
   unter Einstellungen → Podcasts
 - **Warteschlange**: Folgen in der Folge einreihen oder in der Liste nach rechts wischen; sie laufen
-  nacheinander. Reihenfolge ändern und entfernen unter „Warteschlange“ im Menü
+  nacheinander. Länge jeder Folge und verbleibende Gesamtzeit; Reihenfolge ändern und entfernen.
+  Längen, die der Feed nicht nennt, lernt die App beim Abspielen
+- **Downloads**-Ansicht: alle heruntergeladenen Folgen mit Gesamtlänge und Speicherbedarf, laufende
+  Downloads mit Fortschritt
 - **Sleep-Timer** im Player: 5 bis 90 Minuten oder bis zum Ende der Folge, mit sanftem Ausblenden
 - **Statistik**: Hörzeit dieser Woche, dieses Monats, dieses Jahres und insgesamt, Lieblingspodcast,
   meistgehörte Podcasts, die letzten 7 Tage, zu Ende gehörte Folgen und durch Geschwindigkeit
   gesparte Zeit. Bleibt erhalten, wenn ein Podcast abbestellt wird
 - **Podcasts entdecken**: Suche im öffentlichen Podcast-Katalog von Apple und Vorschläge passend zu den
-  abonnierten Podcasts („Weil du … hörst“): gleiche Kategorie, Themen aus den Folgentiteln. Fragt den
-  Katalog nur auf Knopfdruck; dabei gehen Podcast-Namen und Stichwörter an Apple, ohne Konto
+  abonnierten Podcasts („Weil du … hörst“): gleiche Kategorie, Themen aus den Folgentiteln, für alle
+  oder einen ausgewählten Podcast. Ein Tipp auf einen Podcast zeigt die letzten Folgen und wie oft er
+  erscheint. Fragt den Katalog nur auf Knopfdruck; dabei gehen Podcast-Namen und Stichwörter an Apple,
+  ohne Konto
+- Spricht von Folgen und Podcasts statt von Artikeln und Feeds; kein Volltext, kein Widget
 
 ## Bauen
 
@@ -124,6 +137,7 @@ Pfade relativ zu `core/src/main/java/io/github/mohnstollen/news/`.
 | --- | --- |
 | `AppFeatures.kt` | Was News und Podfang unterscheidet |
 | `data/Database.kt` | Room-Datenbank: Feeds, Artikel, Warteschlange, Hör-Protokoll, Löschmarker, Suchindex |
+| `data/Chapters.kt` | Kapitel aus Feed, Kapiteldatei und ID3 |
 | `data/Recommendations.kt` | Podcast-Suche und Vorschläge über den Katalog von Apple |
 | `playback/` | Wiedergabedienst, Downloads, Sleep-Timer (nur Podfang) |
 | `data/FeedParser.kt` | RSS 2.0, RSS 1.0 (RDF) und Atom, Datumsformate |

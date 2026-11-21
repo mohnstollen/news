@@ -80,6 +80,7 @@ class MigrationTest {
             assertTrue("listed", db.articleDao().observeList(null, false).first().any { it.id == 7L })
             assertEquals(false, feed.autoDownload)
             assertTrue("empty queue", db.queueDao().ids().isEmpty())
+            assertNull("no chapters yet", article.chapters)
             assertEquals(0L, db.listenDao().observeTotals(0).first().listenedMs)
 
             // Existing articles are searchable, and so are later changes.

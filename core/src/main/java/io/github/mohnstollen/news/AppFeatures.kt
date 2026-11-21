@@ -17,6 +17,8 @@ data class AppFeatures(
     val podcastWords: Boolean = false,
     /** Loading the full article from the linked web page; usual for news, not for podcasts. */
     val fullText: Boolean = true,
+    /** Tabs at the bottom (Podcasts, Warteschlange, Downloads, Einstellungen) instead of the menu. */
+    val tabs: Boolean = false,
 ) {
     /** The app's word for something: [news] in News, [podcast] in Podfang. */
     fun pick(news: String, podcast: String): String = if (podcastWords) podcast else news
@@ -43,6 +45,7 @@ data class AppFeatures(
             addFeed = "Podcast hinzufügen",
             podcastWords = true,
             fullText = false,
+            tabs = true,
         )
     }
 }

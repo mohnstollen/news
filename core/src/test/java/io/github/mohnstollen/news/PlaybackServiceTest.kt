@@ -201,6 +201,8 @@ class PlaybackServiceTest {
         controller.prepare()
         waitFor("prepared") { player.duration > 0 }
         assertEquals(100_000L, player.duration)
+        // The feed did not say how long it is; the player found out.
+        waitFor("length learned") { runBlocking { repo.articleDao.byId(first)!!.durationSeconds } == 100L }
 
         // 40 seconds left: more than the buffer, nothing happens.
         controller.seekTo(60_000)
@@ -223,5 +225,44 @@ class PlaybackServiceTest {
         waitFor("download deleted") { !file.exists() && runBlocking { repo.articleDao.byId(first)!!.downloadPath } == null }
         controller.release()
         service.onDestroy()
+    }
+
+    @Test
+    fun linkedChapterFilesAreLoadedWhenTheEpisodeIsPlayed() {
+        val server = okhttp3.mockwebserver.MockWebServer()
+        server.enqueue(
+            okhttp3.mockwebserver.MockResponse().setBody(
+                """{"version":"1.2.0","chapters":[{"startTime":0,"title":"Intro"},{"startTime":30,"title":"Thema"}]}""",
+            ),
+        )
+        server.start()
+        try {
+            val id = runBlocking {
+                val feedId = repo.feedDao.insert(Feed(url = "https://example.org/feed", title = "Der Podcast"))
+                repo.articleDao.insertAll(
+                    listOf(
+                        Article(
+                            feedId = feedId, guid = "c", title = "Mit Kapiteln", pubDate = 0, fetchedAt = 0,
+                            enclosureUrl = "https://cdn.example.org/c.wav", downloadPath = silence("c.wav").path,
+                            chaptersUrl = server.url("/c.json").toString(),
+                        ),
+                    ),
+                ).single()
+            }
+            val service = Robolectric.buildService(PlaybackService::class.java).create().get()
+            val session = service.sessions.single()
+            val future = MediaController.Builder(context, session.token).buildAsync()
+            waitFor("controller") { future.isDone }
+            val controller = future.get()
+            controller.setMediaItem(MediaItem.Builder().setMediaId(id.toString()).build())
+            waitFor("chapters") { runBlocking { repo.articleDao.byId(id)!!.chapters } != null }
+            val chapters = io.github.mohnstollen.news.data.Chapters.decode(runBlocking { repo.articleDao.byId(id)!!.chapters })
+            assertEquals(listOf(0L, 30_000L), chapters.map { it.startMs })
+            assertEquals("Thema", chapters[1].title)
+            controller.release()
+            service.onDestroy()
+        } finally {
+            server.shutdown()
+        }
     }
 }
