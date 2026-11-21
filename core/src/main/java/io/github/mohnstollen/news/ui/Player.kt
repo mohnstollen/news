@@ -113,8 +113,10 @@ fun MiniPlayer(onOpenArticle: ((Long) -> Unit)?) {
             )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
             ) {
+                Cover(state.artwork, state.subtitle.ifBlank { state.title }, 44.dp)
+                Spacer(Modifier.width(12.dp))
                 Column(
                     Modifier.weight(1f)
                         .clickable(onClickLabel = "Player öffnen") { sheetOpen = true }
@@ -190,6 +192,9 @@ private fun PlayerSheet(
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 24.dp),
         ) {
+            Box(Modifier.fillMaxWidth().padding(bottom = 16.dp), contentAlignment = Alignment.Center) {
+                Cover(state.artwork, state.subtitle.ifBlank { state.title }, 240.dp)
+            }
             Text(state.title, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
             if (state.subtitle.isNotBlank()) {
                 Text(state.subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

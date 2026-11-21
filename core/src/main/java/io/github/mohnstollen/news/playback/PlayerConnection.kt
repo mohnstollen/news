@@ -27,6 +27,8 @@ data class PlayerState(
     val articleId: Long? = null,
     val title: String = "",
     val subtitle: String = "",
+    /** Cover of the episode or its podcast. */
+    val artwork: String? = null,
     val playing: Boolean = false,
     /** Wants to play but is waiting for data. */
     val buffering: Boolean = false,
@@ -156,6 +158,7 @@ class PlayerConnection(context: Context) {
             articleId = item?.mediaId?.toLongOrNull(),
             title = metadata.title?.toString().orEmpty(),
             subtitle = metadata.artist?.toString().orEmpty(),
+            artwork = metadata.artworkUri?.toString(),
             playing = c.isPlaying,
             buffering = c.playWhenReady && c.playbackState == Player.STATE_BUFFERING,
             ended = c.playbackState == Player.STATE_ENDED,

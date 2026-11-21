@@ -833,6 +833,65 @@ private fun ArchiveSwipe(
     ) { content() }
 }
 
+/**
+ * Podfang's row for an episode: the cover on the left; title, podcast and length on the right.
+ * No teaser: show notes are long and say little in two lines.
+ */
+@Composable
+private fun EpisodeRow(
+    item: ArticleListItem,
+    now: Long,
+    download: DownloadProgress?,
+    modifier: Modifier,
+    titleColor: androidx.compose.ui.graphics.Color,
+    secondary: androidx.compose.ui.graphics.Color,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Cover(item.imageUrl ?: item.feedImageUrl, item.feedTitle, 64.dp, Modifier.padding(top = 2.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = if (item.read) FontWeight.Normal else FontWeight.SemiBold,
+                color = titleColor,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = item.feedTitle + " · " +
+                    DateUtils.getRelativeTimeSpanString(item.pubDate, now, DateUtils.MINUTE_IN_MILLIS),
+                style = MaterialTheme.typography.labelMedium,
+                color = secondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            EpisodeStatus(
+                articleId = item.id,
+                durationSeconds = item.durationSeconds,
+                playPosition = item.playPosition,
+                playedAt = item.playedAt,
+                downloaded = item.downloaded,
+                download = download,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+        if (item.starred || item.hasNote) {
+            Column(Modifier.padding(start = 4.dp, top = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                if (item.starred) {
+                    Icon(Icons.Default.Star, contentDescription = "Gemerkt", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                }
+                if (item.hasNote) {
+                    Icon(Icons.Default.Edit, contentDescription = "Hat eine Notiz", tint = secondary, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ArticleRow(
     item: ArticleListItem,
@@ -844,6 +903,11 @@ private fun ArticleRow(
     val colors = MaterialTheme.colorScheme
     val titleColor = if (item.read) colors.onSurfaceVariant.copy(alpha = 0.75f) else colors.onSurface
     val secondary = colors.onSurfaceVariant.copy(alpha = if (item.read) 0.6f else 1f)
+    val features = LocalContext.current.features
+    if (item.hasAudio && features.podcasts && features.podcastWords) {
+        EpisodeRow(item, now, download, modifier, titleColor, secondary)
+        return
+    }
     Row(modifier = modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)) {
         Column(Modifier.weight(1f)) {
             Text(
@@ -942,7 +1006,8 @@ private fun FeedDrawer(
                     modifier = itemPadding,
                 )
             }
-            item {
+            // With tabs, this is in the "Mehr" tab.
+            if (!features.tabs) item {
                 NavigationDrawerItem(
                     label = { Text("Gemerkt") },
                     icon = { Icon(Icons.Default.Star, contentDescription = null) },
@@ -952,7 +1017,8 @@ private fun FeedDrawer(
                     modifier = itemPadding,
                 )
             }
-            item {
+            // With tabs, this is in the "Mehr" tab.
+            if (!features.tabs) item {
                 NavigationDrawerItem(
                     label = { Text("Archiv") },
                     icon = { Icon(AppIcons.Archive, contentDescription = null) },
@@ -1004,7 +1070,8 @@ private fun FeedDrawer(
                     modifier = itemPadding,
                 )
             }
-            if (features.podcasts) item {
+            // With tabs, these are in the "Mehr" tab.
+            if (features.podcasts && !features.tabs) item {
                 NavigationDrawerItem(
                     label = { Text("Statistik") },
                     icon = { Icon(AppIcons.Stats, contentDescription = null) },
@@ -1013,7 +1080,8 @@ private fun FeedDrawer(
                     modifier = itemPadding,
                 )
             }
-            if (features.podcasts) item {
+            // With tabs, these are in the "Mehr" tab.
+            if (features.podcasts && !features.tabs) item {
                 NavigationDrawerItem(
                     label = { Text("Podcasts entdecken") },
                     icon = { Icon(AppIcons.Explore, contentDescription = null) },

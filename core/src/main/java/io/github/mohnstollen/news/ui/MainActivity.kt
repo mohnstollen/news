@@ -20,9 +20,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -41,6 +49,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -138,7 +147,14 @@ class MainActivity : ComponentActivity() {
                 val tabs = container.features.tabs
                 // A tab is shown without a back arrow; opened from the menu, a screen has one.
                 fun backOrTab(): (() -> Unit)? = if (tabs) null else ({ nav.popBackStack() })
-                TabScaffold(nav, enabled = tabs) { modifier ->
+                TabScaffold(
+                    nav,
+                    enabled = tabs,
+                    onShowScope = { scope ->
+                        mainViewModel.select(scope)
+                        if (scope == MainViewModel.ListScope.All) mainViewModel.setFolder(null)
+                    },
+                ) { modifier ->
                 NavHost(nav, startDestination = "list", modifier = modifier) {
                     composable("list") {
                         ArticleListScreen(
@@ -183,6 +199,7 @@ private data class Tab(val route: String, val label: String, val icon: ImageVect
 private fun TabScaffold(
     nav: androidx.navigation.NavHostController,
     enabled: Boolean,
+    onShowScope: (MainViewModel.ListScope) -> Unit,
     content: @Composable (Modifier) -> Unit,
 ) {
     if (!enabled) {
@@ -200,6 +217,13 @@ private fun TabScaffold(
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
     val onTab = tabs.any { it.route == route }
+    var moreOpen by remember { mutableStateOf(false) }
+    fun go(route: String) = nav.navigate(route) {
+        // One copy of each tab, and the back button leads to the episodes.
+        popUpTo("list") { saveState = true }
+        launchSingleTop = true
+        restoreState = true
+    }
     Scaffold(
         // The screens inside handle the status bar themselves.
         contentWindowInsets = WindowInsets(0),
@@ -210,17 +234,47 @@ private fun TabScaffold(
                         NavigationBarItem(
                             selected = route == tab.route,
                             onClick = {
-                                nav.navigate(tab.route) {
-                                    // One copy of each tab, and the back button leads to the episodes.
-                                    popUpTo("list") { saveState = true }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
+                                // Tapping "Podcasts" again leads back from Gemerkt or Archiv to all episodes.
+                                if (tab.route == "list" && route == "list") onShowScope(MainViewModel.ListScope.All)
+                                go(tab.route)
                             },
-                            icon = { Icon(tab.icon, contentDescription = null) },
-                            label = { Text(tab.label, maxLines = 1) },
+                            icon = { Icon(tab.icon, contentDescription = tab.label) },
+                            label = { TabLabel(tab.label) },
                         )
                     }
+                    // What is used less often, in one menu instead of scattered over the side menu.
+                    NavigationBarItem(
+                        selected = false,
+                        onClick = { moreOpen = true },
+                        icon = {
+                            Box {
+                                Icon(Icons.Default.MoreVert, contentDescription = "Mehr")
+                                DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
+                                    DropdownMenuItem(
+                                        text = { Text("Gemerkt") },
+                                        leadingIcon = { Icon(Icons.Default.Star, contentDescription = null) },
+                                        onClick = { moreOpen = false; onShowScope(MainViewModel.ListScope.Starred); go("list") },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Archiv") },
+                                        leadingIcon = { Icon(AppIcons.Archive, contentDescription = null) },
+                                        onClick = { moreOpen = false; onShowScope(MainViewModel.ListScope.Archive); go("list") },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Statistik") },
+                                        leadingIcon = { Icon(AppIcons.Stats, contentDescription = null) },
+                                        onClick = { moreOpen = false; nav.navigate("stats") },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Podcasts entdecken") },
+                                        leadingIcon = { Icon(AppIcons.Explore, contentDescription = null) },
+                                        onClick = { moreOpen = false; nav.navigate("discover") },
+                                    )
+                                }
+                            }
+                        },
+                        label = { TabLabel("Mehr") },
+                    )
                 }
             }
         },
@@ -228,6 +282,19 @@ private fun TabScaffold(
         // The bar takes the navigation bar's space; the screens must not add it again.
         content(Modifier.padding(padding).consumeWindowInsets(padding))
     }
+}
+
+/** Five tabs share a phone's width: a little smaller and tighter, so "Warteschlange" fits. */
+@Composable
+private fun TabLabel(text: String) {
+    Text(
+        text,
+        maxLines = 1,
+        softWrap = false,
+        style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.sp),
+        // May reach a little into the neighbours' space instead of being cut; their labels are short.
+        modifier = Modifier.wrapContentWidth(unbounded = true),
+    )
 }
 
 @Composable

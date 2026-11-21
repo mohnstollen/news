@@ -1,6 +1,8 @@
 package io.github.mohnstollen.news
 
 import android.app.Application
+import coil.ImageLoader
+import coil.ImageLoaderFactory
 import androidx.room.Room
 import io.github.mohnstollen.news.data.AppDatabase
 import io.github.mohnstollen.news.data.FeedFetcher
@@ -40,9 +42,16 @@ class AppContainer(app: Application, val features: AppFeatures) {
 }
 
 /** Base of both apps; the app modules subclass it and choose their [features]. */
-open class NewsApp : Application() {
+open class NewsApp : Application(), ImageLoaderFactory {
     open val features: AppFeatures = AppFeatures.NEWS
     val container: AppContainer by lazy { AppContainer(this, features) }
+
+    /** Covers come over the app's own connection and stay cached for offline use. */
+    override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
+        .okHttpClient { container.http }
+        .crossfade(true)
+        .respectCacheHeaders(false)
+        .build()
 
     override fun onCreate() {
         super.onCreate()

@@ -116,7 +116,7 @@ abstract class UiTestBase {
 
     /** Scrolls the open drawer to an entry and taps it; the drawer is longer than the test screen. */
     protected fun openFromDrawer(text: String) {
-        compose.onNode(hasScrollToNodeAction() and hasAnyDescendant(hasText("Gemerkt")))
+        compose.onNode(hasScrollToNodeAction() and hasAnyDescendant(hasText(context.container.features.allItems)))
             .performScrollToNode(hasText(text))
         compose.onNodeWithText(text).performClick()
     }
@@ -546,7 +546,7 @@ class EpisodeUiTest : UiTestBase() {
             compose.onNode(hasClickAction() and hasText("Die Audiodatei ist nicht (mehr) abrufbar"), useUnmergedTree = false)
                 .performClick()
             waitFor("Geschwindigkeit")
-            compose.onNodeWithText("1,5×").performClick()
+            compose.onNodeWithText("1,5×").performScrollTo().performClick()
             eventually("speed") { context.container.settings.current.playbackSpeed == 1.5f }
             compose.onNodeWithText("Beenden").performScrollTo().performClick()
             eventually("mini player gone") { compose.onAllNodesWithText("Folge Eins").fetchSemanticsNodes().size == 1 }
@@ -763,45 +763,57 @@ class PodfangModeUiTest : UiTestBase() {
         compose.onNodeWithText("Offen").assertIsDisplayed()
         screenshot("podfang-folgen")
 
-        // The menu: no queue or settings there, they have tabs.
+        // The side menu: only the episodes, the podcasts and their management.
         compose.onNodeWithContentDescription("Podcasts anzeigen").performClick()
         waitFor("Podfang")
-        assertTrue(compose.onAllNodesWithText("Einstellungen").fetchSemanticsNodes().size == 1)
-        compose.onNode(hasScrollToNodeAction() and hasAnyDescendant(hasText("Gemerkt")))
-            .performScrollToNode(hasText("Podcasts entdecken"))
+        for (entry in listOf("Gemerkt", "Archiv", "Statistik", "Podcasts entdecken")) {
+            assertTrue("$entry is not in the side menu", compose.onAllNodesWithText(entry).fetchSemanticsNodes().isEmpty())
+        }
+        screenshot("podfang-menue")
         openFromDrawer("Podcasts verwalten")
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("Podcast hinzufügen", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithContentDescription("Zurück").performClick()
 
+        // "Mehr": the starred episodes, then back to all of them with the Podcasts tab.
+        compose.onNodeWithContentDescription("Mehr", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("Gemerkt").performClick()
+        waitFor("Noch keine Folgen gemerkt.")
+        compose.onNodeWithContentDescription("Podcasts", useUnmergedTree = true).performClick()
+        waitFor("Alle Folgen")
+        compose.onNodeWithContentDescription("Mehr", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("Statistik").performClick()
+        waitFor("Noch nichts gehört.")
+        compose.onNodeWithContentDescription("Zurück").performClick()
+        waitFor("Alle Folgen")
+
         // Queue tab: length per episode and in total.
-        compose.waitUntil(5_000) { compose.onAllNodesWithText("Warteschlange").fetchSemanticsNodes().isNotEmpty() }
-        compose.onAllNodesWithText("Warteschlange").onFirst().performClick()
+        compose.onNodeWithContentDescription("Warteschlange", useUnmergedTree = true).performClick()
         waitFor("1 Folge · 30 Min verbleibend")
         assertTrue("a tab has no back arrow", compose.onAllNodesWithContentDescription("Zurück").fetchSemanticsNodes().isEmpty())
         screenshot("podfang-warteschlange")
 
         // Downloads tab: the downloaded episode, with the total.
-        compose.onNodeWithText("Downloads").performClick()
+        compose.onNodeWithContentDescription("Downloads", useUnmergedTree = true).performClick()
         waitFor("Geladene Folge")
         waitFor("1 Folge · 30 Min")
         screenshot("podfang-downloads")
 
         // Settings tab: podcast settings, no widget, no full text.
-        compose.onAllNodesWithText("Einstellungen").onFirst().performClick()
+        compose.onNodeWithContentDescription("Einstellungen", useUnmergedTree = true).performClick()
         waitFor("Intervall in Minuten")
         assertTrue(compose.onAllNodesWithText("Widget").fetchSemanticsNodes().isEmpty())
         assertEquals("own Nextcloud folder", "Podfang", context.container.settings.current.ncFolder)
         assertEquals("Podfang (Android)", context.container.features.clientName)
 
         // Back to the episodes; the reader offers no full text.
-        compose.onNode(hasText("Podcasts") and hasClickAction()).performClick()
+        compose.onNodeWithContentDescription("Podcasts", useUnmergedTree = true).performClick()
         waitFor("Geladene Folge")
         compose.onNodeWithText("Geladene Folge").performClick()
         compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("Archivieren").fetchSemanticsNodes().isNotEmpty() }
         assertTrue(compose.onAllNodesWithContentDescription("Volltext laden").fetchSemanticsNodes().isEmpty())
-        assertTrue("no tabs on an episode", compose.onAllNodesWithText("Downloads").fetchSemanticsNodes().isEmpty())
+        assertTrue("no tabs on an episode", compose.onAllNodesWithContentDescription("Downloads", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
         assertEquals(episode, runBlocking { repo.queueDao.ids() }.single())
     }
 }

@@ -54,8 +54,10 @@ sie nicht brauchen.
 
 ## Nur Podfang
 
-- **Tabs** unten: Podcasts, Warteschlange, Downloads, Einstellungen. Statistik, Podcasts entdecken und
-  die Podcast-Verwaltung liegen im Menü der Podcasts-Ansicht
+- **Tabs** unten: Podcasts, Warteschlange, Downloads, Einstellungen und „Mehr“ (Gemerkt, Archiv,
+  Statistik, Podcasts entdecken). Das Seitenmenü zeigt nur alle Folgen, die Podcasts und ihre Verwaltung
+- **Cover**: in der Folgen-Liste als Vorschaubild (dazu Titel, Podcast und Länge), groß im Player und
+  klein im Mini-Player; zwischengespeichert, also auch offline sichtbar
 - **Kapitel** im Player: aus dem Feed (Podlove Simple Chapters), aus einer verlinkten Kapiteldatei
   (Podcasting 2.0) oder aus der MP3-Datei (ID3); aktuelles Kapitel, Liste zum Springen, vorheriges
   und nächstes Kapitel

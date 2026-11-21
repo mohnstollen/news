@@ -70,6 +70,10 @@ dependencies {
     implementation("androidx.media3:media3-session:1.5.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.5.1")
 
+    // Podcast covers: loading and caching images (also offline), without Google services
+    // api: the apps' application classes inherit Coil's ImageLoaderFactory through NewsApp.
+    api("io.coil-kt:coil-compose:2.7.0")
+
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")

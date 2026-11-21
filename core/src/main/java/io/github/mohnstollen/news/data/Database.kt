@@ -265,6 +265,9 @@ data class ArticleListItem(
     val playedAt: Long = 0,
     val downloaded: Boolean = false,
     val archived: Boolean = false,
+    /** Artwork of the episode, else of its podcast. */
+    val imageUrl: String? = null,
+    val feedImageUrl: String? = null,
 )
 
 data class DownloadRow(val id: Long, val downloadPath: String)
@@ -376,7 +379,8 @@ interface ArticleDao {
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
             "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
             "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt, " +
-            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived " +
+            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived, " +
+            "a.imageUrl, f.imageUrl AS feedImageUrl " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId " +
             "WHERE (:feedId IS NULL OR a.feedId = :feedId) AND (:starredOnly = 0 OR a.starred = 1) " +
             // archive: NOT_ARCHIVED (0), ARCHIVED (1) or ANY (2)
@@ -390,7 +394,8 @@ interface ArticleDao {
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
             "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
             "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt, " +
-            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived " +
+            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived, " +
+            "a.imageUrl, f.imageUrl AS feedImageUrl " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId JOIN articles_fts ON articles_fts.docid = a.id " +
             "WHERE articles_fts MATCH :match " +
             "AND (:feedId IS NULL OR a.feedId = :feedId) AND (:starredOnly = 0 OR a.starred = 1) " +
@@ -402,7 +407,8 @@ interface ArticleDao {
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
             "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
             "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt, " +
-            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived " +
+            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived, " +
+            "a.imageUrl, f.imageUrl AS feedImageUrl " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId WHERE a.id IN (:ids) " +
             "ORDER BY a.pubDate DESC, a.id DESC",
     )
@@ -412,7 +418,8 @@ interface ArticleDao {
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
             "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
             "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt, " +
-            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived " +
+            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived, " +
+            "a.imageUrl, f.imageUrl AS feedImageUrl " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId WHERE a.read = 0 " +
             "AND (:feedId IS NULL OR a.feedId = :feedId) AND (:folder IS NULL OR f.category = :folder) " +
             "ORDER BY a.pubDate DESC, a.id DESC LIMIT :limit",
