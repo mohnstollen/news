@@ -14,7 +14,10 @@ import io.github.mohnstollen.news.data.Feed
 import io.github.mohnstollen.news.ui.container
 import io.github.mohnstollen.news.widget.NewsWidget
 import io.github.mohnstollen.news.widget.NewsWidgetProvider
+import io.github.mohnstollen.news.widget.WidgetConfigActivity
 import io.github.mohnstollen.news.widget.WidgetRows
+import io.github.mohnstollen.news.widget.WidgetSource
+import io.github.mohnstollen.news.widget.WidgetSources
 import io.github.mohnstollen.news.work.Notifier
 import io.github.mohnstollen.news.work.RefreshWorker
 import kotlinx.coroutines.runBlocking
@@ -69,7 +72,7 @@ class WidgetTest {
         val status = text(widgets.getViewFor(id), R.id.widget_status)
         assertTrue(status, status.startsWith("2 ungelesen · Stand "))
 
-        val rows = WidgetRows(context).apply { onDataSetChanged() }
+        val rows = WidgetRows(context, id).apply { onDataSetChanged() }
         assertEquals(2, rows.count)
         val first = rows.getViewAt(0)!!.apply(context, FrameLayout(context))
         assertEquals("Neuester", text(first, R.id.widget_item_title))
@@ -85,6 +88,87 @@ class WidgetTest {
         rows.onDataSetChanged()
         assertEquals(0, rows.count)
         assertTrue(text(widgets.getViewFor(id), R.id.widget_status).startsWith("Alles gelesen"))
+    }
+
+    /** Places a widget and waits until the drawing that placing it starts in the background is done. */
+    private fun place(): Int {
+        val id = widgets.createWidget(NewsWidgetProvider::class.java, R.layout.widget)
+        val deadline = System.currentTimeMillis() + 10_000
+        while (text(widgets.getViewFor(id), R.id.widget_status).isEmpty() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20)
+        }
+        return id
+    }
+
+    private fun rowTitles(id: Int) = WidgetRows(context, id).run {
+        onDataSetChanged()
+        (0 until count).map { text(getViewAt(it)!!.apply(context, FrameLayout(context)), R.id.widget_item_title) }
+    }
+
+    @Test
+    fun eachWidgetShowsAllFeedsAFolderOrOneFeed() {
+        val now = System.currentTimeMillis()
+        val ids = runBlocking {
+            fun feed(url: String, title: String, category: String?) =
+                Feed(url = url, title = title, category = category, updatedAt = now)
+            val technik1 = repo.feedDao.insert(feed("https://a.example/feed", "Heise", "Technik"))
+            val technik2 = repo.feedDao.insert(feed("https://b.example/feed", "Golem", "Technik"))
+            val lokal = repo.feedDao.insert(feed("https://c.example/feed", "Lokalzeitung", null))
+            fun article(feedId: Long, title: String, ageMinutes: Long, read: Boolean = false) = Article(
+                feedId = feedId, guid = title, title = title, pubDate = now - ageMinutes * 60_000, fetchedAt = now, read = read,
+            )
+            repo.articleDao.insertAll(
+                listOf(
+                    article(technik1, "Neuer Prozessor", 1),
+                    article(technik2, "Neues Telefon", 2),
+                    article(technik2, "Schon gelesen", 3, read = true),
+                    article(lokal, "Stadtfest", 4),
+                ),
+            )
+            Triple(technik1, technik2, lokal)
+        }
+
+        val all = place()
+        val folder = place()
+        val single = place()
+        WidgetSources.set(context, folder, WidgetSource.Folder("Technik"))
+        WidgetSources.set(context, single, WidgetSource.Feed(ids.third))
+        runBlocking { NewsWidget.updateAll(context) }
+
+        // Placed before there was a choice, or never configured: all feeds.
+        assertEquals(WidgetSource.All, WidgetSources.get(context, all))
+        assertEquals("News", text(widgets.getViewFor(all), R.id.widget_title))
+        assertTrue(text(widgets.getViewFor(all), R.id.widget_status).startsWith("3 ungelesen"))
+        assertEquals(listOf("Neuer Prozessor", "Neues Telefon", "Stadtfest"), rowTitles(all))
+
+        assertEquals("Technik", text(widgets.getViewFor(folder), R.id.widget_title))
+        assertTrue(text(widgets.getViewFor(folder), R.id.widget_status).startsWith("2 ungelesen"))
+        assertEquals(listOf("Neuer Prozessor", "Neues Telefon"), rowTitles(folder))
+
+        assertEquals("Lokalzeitung", text(widgets.getViewFor(single), R.id.widget_title))
+        assertTrue(text(widgets.getViewFor(single), R.id.widget_status).startsWith("1 ungelesen"))
+        assertEquals(listOf("Stadtfest"), rowTitles(single))
+
+        // The heading opens the app on the same folder; the settings button opens the choice.
+        val app = shadowOf(context as android.app.Application)
+        widgets.getViewFor(folder).findViewById<android.view.View>(R.id.widget_header).performClick()
+        assertEquals("folder:Technik", app.nextStartedActivity.getStringExtra(NewsWidget.EXTRA_SOURCE))
+        widgets.getViewFor(single).findViewById<android.view.View>(R.id.widget_configure).performClick()
+        val configure = app.nextStartedActivity
+        assertEquals(WidgetConfigActivity::class.java.name, configure.component!!.className)
+        assertEquals(single, configure.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1))
+
+        // The chosen feed is unsubscribed: the widget says so instead of showing something else.
+        runBlocking {
+            repo.deleteFeed(ids.third)
+            NewsWidget.updateAll(context)
+        }
+        assertTrue(text(widgets.getViewFor(single), R.id.widget_status).startsWith("Diesen Feed gibt es nicht mehr"))
+        assertEquals(emptyList<String>(), rowTitles(single))
+
+        // A removed widget forgets its choice.
+        NewsWidgetProvider().onDeleted(context, intArrayOf(folder))
+        assertEquals(WidgetSource.All, WidgetSources.get(context, folder))
     }
 
     @Test

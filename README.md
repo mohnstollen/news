@@ -7,7 +7,7 @@ Zwei Android-Apps (ab Android 8.0) aus einer Codebasis, geschrieben in Kotlin mi
 
 Beide lassen sich nebeneinander installieren und haben getrennte Daten.
 
-## Aufbau
+## Module
 
 | Modul | Inhalt |
 |---|---|
@@ -46,8 +46,9 @@ sie nicht brauchen.
 
 ## Nur News
 
-- **Widget** für den Startbildschirm mit den neuesten ungelesenen Artikeln und eigenem,
-  einstellbarem Aktualisierungsintervall
+- **Widget** für den Startbildschirm mit den neuesten ungelesenen Artikeln aller Feeds, eines
+  Ordners oder eines einzelnen Feeds (pro Widget wählbar, auch mehrere nebeneinander) und mit
+  eigenem, einstellbarem Aktualisierungsintervall
 
 ## Nur Podfang
 
@@ -115,11 +116,16 @@ Die App legt im gewählten Ordner zwei Dateien an:
 Der Gelesen-Status wird nicht synchronisiert. Das Passwort wird verschlüsselt im Android
 Keystore abgelegt.
 
-## Aufbau
+## Code im Kern
+
+Pfade relativ zu `core/src/main/java/io/github/mohnstollen/news/`.
 
 | Pfad | Inhalt |
 | --- | --- |
-| `data/Database.kt` | Room-Datenbank: Feeds, Artikel, Löschmarker, Suchindex |
+| `AppFeatures.kt` | Was News und Podfang unterscheidet |
+| `data/Database.kt` | Room-Datenbank: Feeds, Artikel, Warteschlange, Hör-Protokoll, Löschmarker, Suchindex |
+| `data/Recommendations.kt` | Podcast-Suche und Vorschläge über den Katalog von Apple |
+| `playback/` | Wiedergabedienst, Downloads, Sleep-Timer (nur Podfang) |
 | `data/FeedParser.kt` | RSS 2.0, RSS 1.0 (RDF) und Atom, Datumsformate |
 | `data/Network.kt` | Abruf, Feed-Suche auf Webseiten, Volltext-Extraktion |
 | `data/Opml.kt` | OPML lesen und schreiben |
@@ -128,6 +134,6 @@ Keystore abgelegt.
 | `data/Repository.kt` | Aktualisieren, Abonnements, Artikelstatus |
 | `work/RefreshWorker.kt` | Hintergrund-Aktualisierung mit WorkManager |
 | `work/Notifier.kt` | Benachrichtigung über neue Artikel |
-| `widget/NewsWidget.kt` | Startbildschirm-Widget |
+| `widget/` | Startbildschirm-Widget mit Auswahl pro Widget |
 | `ui/QrScanner.kt` | Kamera-Ansicht für den QR-Code |
 | `ui/` | Oberfläche: Artikelliste, Leseansicht, Feeds, Einstellungen |

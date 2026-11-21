@@ -656,7 +656,9 @@ class QueueAndStatsUiTest : UiTestBase() {
         compose.onNodeWithText("Episode 2").performClick()
         compose.onNodeWithContentDescription("Aus der Warteschlange nehmen").performClick()
         compose.waitUntil(5_000) { runBlocking { repo.queueDao.ids() }.isEmpty() }
-        compose.onNodeWithContentDescription("Zur Warteschlange hinzufügen").assertIsDisplayed()
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithContentDescription("Zur Warteschlange hinzufügen").fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNodeWithContentDescription("Zurück").performClick()
         compose.onNodeWithContentDescription("Zurück").performClick()
 

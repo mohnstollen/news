@@ -400,9 +400,16 @@ interface ArticleDao {
             "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt, " +
             "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId WHERE a.read = 0 " +
+            "AND (:feedId IS NULL OR a.feedId = :feedId) AND (:folder IS NULL OR f.category = :folder) " +
             "ORDER BY a.pubDate DESC, a.id DESC LIMIT :limit",
     )
-    suspend fun newestUnread(limit: Int): List<ArticleListItem>
+    suspend fun newestUnread(limit: Int, feedId: Long? = null, folder: String? = null): List<ArticleListItem>
+
+    @Query(
+        "SELECT COUNT(*) FROM articles a JOIN feeds f ON f.id = a.feedId WHERE a.read = 0 " +
+            "AND (:feedId IS NULL OR a.feedId = :feedId) AND (:folder IS NULL OR f.category = :folder)",
+    )
+    suspend fun countUnread(feedId: Long? = null, folder: String? = null): Int
 
     @Query("SELECT COUNT(*) FROM articles WHERE read = 0")
     fun observeUnreadCount(): Flow<Int>

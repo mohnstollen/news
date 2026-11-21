@@ -9,5 +9,6 @@
 
         <receiver android:name="io.github.mohnstollen.news.widget.NewsWidgetProvider" tools:node="remove" />
         <service android:name="io.github.mohnstollen.news.widget.WidgetService" tools:node="remove" />
+        <activity android:name="io.github.mohnstollen.news.widget.WidgetConfigActivity" tools:node="remove" />
     </application>
 </manifest>
