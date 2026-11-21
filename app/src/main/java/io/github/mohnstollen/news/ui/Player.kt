@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.mohnstollen.news.playback.DownloadProgress
 import io.github.mohnstollen.news.playback.Episodes
 import io.github.mohnstollen.news.playback.PlayerConnection
 import io.github.mohnstollen.news.playback.PlayerState
@@ -255,9 +256,17 @@ private fun PlayerSheet(
 fun speedLabel(speed: Float): String =
     String.format(Locale.GERMAN, if (speed % 1f == 0f) "%.0f×" else "%.1f×", speed)
 
-/** For the article list: the episode's length or progress. */
+/** For the article list: the episode's length or progress, and whether it is downloaded. */
 @Composable
-fun EpisodeStatus(articleId: Long, durationSeconds: Long?, playPosition: Long, playedAt: Long, modifier: Modifier = Modifier) {
+fun EpisodeStatus(
+    articleId: Long,
+    durationSeconds: Long?,
+    playPosition: Long,
+    playedAt: Long,
+    downloaded: Boolean,
+    download: DownloadProgress?,
+    modifier: Modifier = Modifier,
+) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = modifier) {
         EpisodePlayButton(articleId)
         val label = Episodes.label(durationSeconds, playPosition, playedAt)
@@ -265,5 +274,72 @@ fun EpisodeStatus(articleId: Long, durationSeconds: Long?, playPosition: Long, p
             Spacer(Modifier.width(8.dp))
             Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        Spacer(Modifier.width(8.dp))
+        when {
+            download != null -> DownloadProgressIcon(download, Modifier.size(16.dp))
+            downloaded -> Icon(
+                AppIcons.DownloadDone,
+                contentDescription = "Heruntergeladen",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp),
+            )
+        }
     }
+}
+
+@Composable
+private fun DownloadProgressIcon(download: DownloadProgress, modifier: Modifier) {
+    val fraction = download.fraction
+    val description = when {
+        !download.running -> "Download wartet"
+        fraction != null -> "Wird geladen, ${(fraction * 100).toInt()} %"
+        else -> "Wird geladen"
+    }
+    Box(modifier.semantics { contentDescription = description }) {
+        if (download.running && fraction != null) {
+            CircularProgressIndicator(progress = { fraction }, strokeWidth = 2.dp, modifier = Modifier.matchParentSize())
+        } else {
+            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.matchParentSize())
+        }
+    }
+}
+
+/** Download, cancel or delete the episode's file. */
+@Composable
+fun EpisodeDownloadButton(
+    downloaded: Boolean,
+    download: DownloadProgress?,
+    onDownload: () -> Unit,
+    onCancel: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    when {
+        download != null -> IconButton(onClick = onCancel) {
+            Box(contentAlignment = Alignment.Center) {
+                DownloadProgressIcon(download, Modifier.size(28.dp))
+                Icon(Icons.Default.Close, contentDescription = "Download abbrechen", modifier = Modifier.size(14.dp))
+            }
+        }
+        downloaded -> IconButton(onClick = onDelete) {
+            Icon(AppIcons.DownloadDone, contentDescription = "Download löschen", tint = MaterialTheme.colorScheme.primary)
+        }
+        else -> IconButton(onClick = onDownload) {
+            Icon(AppIcons.Download, contentDescription = "Herunterladen", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Shows the speed; a tap switches to the next one. */
+@Composable
+fun SpeedButton() {
+    val player = LocalPlayer.current ?: return
+    val speed = playerState().speed
+    TextButton(
+        onClick = {
+            val speeds = PlayerConnection.SPEEDS
+            val next = speeds.firstOrNull { it > speed + 0.01f } ?: speeds.first()
+            player.setSpeed(next)
+        },
+        modifier = Modifier.semantics { contentDescription = "Geschwindigkeit ${speedLabel(speed)}, ändern" },
+    ) { Text(speedLabel(speed)) }
 }

@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.github.mohnstollen.news.data.ANY
+import io.github.mohnstollen.news.data.ARCHIVED
 import io.github.mohnstollen.news.data.AppDatabase
 import io.github.mohnstollen.news.data.FeedException
 import io.github.mohnstollen.news.data.FeedFetcher
@@ -296,6 +298,65 @@ class RepositoryTest {
         assertEquals(0, d.repo.articleDao.deleteOld(feed.id, Long.MAX_VALUE, listOf("andere")))
         d.repo.articleDao.setDownloadPath(id, null)
         assertEquals(1, d.repo.articleDao.deleteOld(feed.id, Long.MAX_VALUE, listOf("andere")))
+    }
+
+    @Test
+    fun archivedArticlesLeaveTheListsButStayFindable() = runBlocking {
+        val d = device()
+        serve("/feed.xml", rss(Triple("a", "Interessant", recent), Triple("b", "Langweilig", recent.minusSeconds(60))))
+        val feed = d.repo.addFeed(url("/feed.xml"), null)
+        val ids = d.repo.articleDao.observeList(null, false).first().associate { it.title to it.id }
+        val boring = ids.getValue("Langweilig")
+        d.repo.setStarred(ids.getValue("Interessant"), true)
+
+        d.repo.setArchived(listOf(boring), true)
+        assertEquals(listOf("Interessant"), d.repo.articleDao.observeList(null, false).first().map { it.title })
+        assertEquals(listOf("Interessant"), d.repo.articleDao.observeList(feed.id, false).first().map { it.title })
+        val archive = d.repo.articleDao.observeList(null, false, ARCHIVED).first()
+        assertEquals(listOf("Langweilig"), archive.map { it.title })
+        assertTrue(archive.single().archived)
+        assertTrue("archiving counts as read", archive.single().read)
+        assertEquals(1, d.repo.articleDao.observeUnreadCount().first())
+        assertEquals("the search still finds it", listOf(boring),
+            d.repo.articleDao.observeSearch(SearchQuery.toMatch("langweilig")!!, null, false).first().map { it.id })
+
+        // An update does not bring it back.
+        serve("/feed.xml", rss(Triple("a", "Interessant", recent), Triple("b", "Langweilig", recent.minusSeconds(60))))
+        d.repo.refresh(feed.id)
+        assertEquals(1, d.repo.articleDao.observeList(null, false).first().size)
+
+        // Starred ones stay in the starred list even when archived.
+        d.repo.setArchived(listOf(ids.getValue("Interessant")), true)
+        assertEquals(listOf("Interessant"), d.repo.articleDao.observeList(null, true, ANY).first().map { it.title })
+        assertTrue(d.repo.articleDao.observeList(null, false).first().isEmpty())
+
+        d.repo.setArchived(listOf(boring), false)
+        val back = d.repo.articleDao.observeList(null, false).first().single()
+        assertEquals("Langweilig", back.title)
+        assertTrue("unarchiving does not make it unread", back.read)
+    }
+
+    @Test
+    fun newEpisodesOfFeedsWithAutoDownloadAreHandedOn() = runBlocking {
+        val d = device()
+        val handed = mutableListOf<Long>()
+        d.repo.onNewEpisodes = { handed += it }
+        serve("/feed.xml", rss(Triple("1", "Folge 1", recent)))
+        val feed = d.repo.addFeed(url("/feed.xml"), null)
+        d.repo.updateFeed(feed.id, feed.title, feed.url, null, false, autoDownload = true)
+        assertTrue("the back catalogue is not downloaded", handed.isEmpty())
+        assertTrue(d.repo.feedDao.byId(feed.id)!!.autoDownload)
+
+        serve("/feed.xml", rss(Triple("2", "Folge 2", Instant.now()), Triple("1", "Folge 1", recent)))
+        d.repo.refresh(feed.id)
+        val newId = d.repo.articleDao.observeList(null, false).first().first { it.title == "Folge 2" }.id
+        assertEquals(listOf(newId), handed)
+
+        val deleted = mutableListOf<String>()
+        d.repo.onFeedDeleting = { deleted += it }
+        d.repo.articleDao.setDownloadPath(newId, "/files/episodes/$newId.mp3")
+        d.repo.deleteFeed(feed.id)
+        assertEquals(listOf("/files/episodes/$newId.mp3"), deleted)
     }
 
     @Test

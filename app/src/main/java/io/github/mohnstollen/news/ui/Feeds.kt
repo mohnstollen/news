@@ -198,8 +198,8 @@ fun FeedsScreen(onBack: () -> Unit) {
         EditFeedDialog(
             feed = entry.feed,
             folders = folders,
-            onSave = { title, url, category, fullText, notify ->
-                repo.updateFeed(entry.feed.id, title, url, category, fullText, notify)
+            onSave = { title, url, category, fullText, notify, autoDownload ->
+                repo.updateFeed(entry.feed.id, title, url, category, fullText, notify, autoDownload)
             },
             onSaved = { editId = null },
             onDismiss = { editId = null },
@@ -245,6 +245,7 @@ private fun FeedRow(entry: FeedWithUnread, onEdit: () -> Unit, onDelete: () -> U
                 add(if (entry.unread == 1) "1 ungelesen" else "${entry.unread} ungelesen")
                 if (feed.fetchFullText) add("Volltext")
                 if (!feed.notify) add("stumm")
+                if (feed.autoDownload) add("lädt Folgen")
                 add(
                     if (feed.lastFetched == 0L) "noch nicht geladen"
                     else "geladen " + DateUtils.getRelativeTimeSpanString(
@@ -368,7 +369,14 @@ private fun AddFeedDialog(
 private fun EditFeedDialog(
     feed: Feed,
     folders: List<String>,
-    onSave: suspend (title: String, url: String, category: String?, fetchFullText: Boolean, notify: Boolean) -> Unit,
+    onSave: suspend (
+        title: String,
+        url: String,
+        category: String?,
+        fetchFullText: Boolean,
+        notify: Boolean,
+        autoDownload: Boolean,
+    ) -> Unit,
     onSaved: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -377,6 +385,7 @@ private fun EditFeedDialog(
     var category by rememberSaveable { mutableStateOf(feed.category.orEmpty()) }
     var fullText by rememberSaveable { mutableStateOf(feed.fetchFullText) }
     var notify by rememberSaveable { mutableStateOf(feed.notify) }
+    var autoDownload by rememberSaveable { mutableStateOf(feed.autoDownload) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -430,6 +439,17 @@ private fun EditFeedDialog(
                     }
                     Switch(checked = notify, onCheckedChange = { notify = it }, enabled = !busy)
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Neue Folgen herunterladen")
+                        Text(
+                            "Für Podcasts: lädt neue Folgen nach jedem Update, damit sie offline abspielbar sind.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = autoDownload, onCheckedChange = { autoDownload = it }, enabled = !busy)
+                }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             }
@@ -441,7 +461,7 @@ private fun EditFeedDialog(
                     busy = true
                     scope.launch {
                         try {
-                            onSave(title, url, category, fullText, notify)
+                            onSave(title, url, category, fullText, notify, autoDownload)
                             onSaved()
                         } catch (e: CancellationException) {
                             throw e

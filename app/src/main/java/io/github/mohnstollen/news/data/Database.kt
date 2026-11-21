@@ -37,6 +37,8 @@ data class Feed(
     @ColumnInfo(defaultValue = "1") val notify: Boolean = true,
     /** Cover art from the feed (podcast artwork); null if the feed has none. */
     val imageUrl: String? = null,
+    /** Download new episodes of this feed after each update. */
+    @ColumnInfo(defaultValue = "0") val autoDownload: Boolean = false,
 )
 
 @Entity(
@@ -88,6 +90,8 @@ data class Article(
     @ColumnInfo(defaultValue = "0") val playedAt: Long = 0,
     /** Downloaded file in app storage; null if not downloaded. */
     val downloadPath: String? = null,
+    /** When it was archived (left out of the lists); 0 if not archived. */
+    @ColumnInfo(defaultValue = "0") val archivedAt: Long = 0,
 )
 
 /** Full-text index over the searchable columns of [Article]; Room keeps it in sync. */
@@ -132,7 +136,16 @@ data class ArticleListItem(
     val durationSeconds: Long? = null,
     val playPosition: Long = 0,
     val playedAt: Long = 0,
+    val downloaded: Boolean = false,
+    val archived: Boolean = false,
 )
+
+data class DownloadRow(val id: Long, val downloadPath: String)
+
+/** Which articles [ArticleDao.observeList] returns, by archive state. */
+const val NOT_ARCHIVED = 0
+const val ARCHIVED = 1
+const val ANY = 2
 
 data class ArticleSyncRow(
     val feedUrl: String,
@@ -181,6 +194,9 @@ interface FeedDao {
     @Query("UPDATE feeds SET notify = :notify WHERE id = :id")
     suspend fun setNotify(id: Long, notify: Boolean)
 
+    @Query("UPDATE feeds SET autoDownload = :autoDownload WHERE id = :id")
+    suspend fun setAutoDownload(id: Long, autoDownload: Boolean)
+
     @Query("UPDATE feeds SET etag = NULL, lastModified = NULL WHERE id = :id")
     suspend fun clearCacheHeaders(id: Long)
 
@@ -222,18 +238,22 @@ interface ArticleDao {
     @Query(
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
             "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
-            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt " +
+            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt, " +
+            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId " +
             "WHERE (:feedId IS NULL OR a.feedId = :feedId) AND (:starredOnly = 0 OR a.starred = 1) " +
+            // archive: NOT_ARCHIVED (0), ARCHIVED (1) or ANY (2)
+            "AND (:archive = 2 OR (:archive = 1) = (a.archivedAt > 0)) " +
             "ORDER BY a.pubDate DESC, a.id DESC LIMIT 5000",
     )
-    fun observeList(feedId: Long?, starredOnly: Boolean): Flow<List<ArticleListItem>>
+    fun observeList(feedId: Long?, starredOnly: Boolean, archive: Int = NOT_ARCHIVED): Flow<List<ArticleListItem>>
 
     /** [match] is an FTS expression, see [SearchQuery]. Read articles are included. */
     @Query(
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
             "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
-            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt " +
+            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt, " +
+            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId JOIN articles_fts ON articles_fts.docid = a.id " +
             "WHERE articles_fts MATCH :match " +
             "AND (:feedId IS NULL OR a.feedId = :feedId) AND (:starredOnly = 0 OR a.starred = 1) " +
@@ -244,7 +264,8 @@ interface ArticleDao {
     @Query(
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
             "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
-            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt " +
+            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt, " +
+            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId WHERE a.id IN (:ids) " +
             "ORDER BY a.pubDate DESC, a.id DESC",
     )
@@ -253,7 +274,8 @@ interface ArticleDao {
     @Query(
         "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
             "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
-            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt " +
+            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt, " +
+            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived " +
             "FROM articles a JOIN feeds f ON f.id = a.feedId WHERE a.read = 0 " +
             "ORDER BY a.pubDate DESC, a.id DESC LIMIT :limit",
     )
@@ -264,6 +286,19 @@ interface ArticleDao {
 
     @Query("SELECT COUNT(*) FROM articles WHERE starred = 1")
     fun observeStarredCount(): Flow<Int>
+
+    @Query("UPDATE articles SET archivedAt = :archivedAt WHERE id IN (:ids)")
+    suspend fun setArchived(ids: List<Long>, archivedAt: Long)
+
+    /** Unlike [setRead], keeps the time already read articles were read. */
+    @Query("UPDATE articles SET read = 1, readAt = :now WHERE id IN (:ids) AND read = 0")
+    suspend fun markReadIfUnread(ids: List<Long>, now: Long)
+
+    @Query("SELECT id, downloadPath FROM articles WHERE downloadPath IS NOT NULL")
+    suspend fun downloads(): List<DownloadRow>
+
+    @Query("SELECT downloadPath FROM articles WHERE feedId = :feedId AND downloadPath IS NOT NULL")
+    suspend fun downloadPaths(feedId: Long): List<String>
 
     @Query("SELECT * FROM articles WHERE id = :id")
     fun observe(id: Long): Flow<Article?>
@@ -328,9 +363,6 @@ interface ArticleDao {
         imageUrl: String?,
     )
 
-    /** Unlike [setRead], keeps the time an already read article was read. */
-    @Query("UPDATE articles SET read = 1, readAt = :now WHERE id = :id AND read = 0")
-    suspend fun markReadIfUnread(id: Long, now: Long)
 
     @Query("UPDATE articles SET playPosition = :positionMs WHERE id = :id")
     suspend fun setPlayPosition(id: Long, positionMs: Long)
@@ -362,7 +394,7 @@ interface ArticleDao {
 
 @Database(
     entities = [Feed::class, Article::class, DeletedFeed::class, ArticleFts::class],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -405,7 +437,15 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+        /** Archive and automatic downloads. */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE articles ADD COLUMN archivedAt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE feeds ADD COLUMN autoDownload INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
     }
 }
 

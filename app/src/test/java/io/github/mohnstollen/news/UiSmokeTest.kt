@@ -15,6 +15,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
@@ -527,6 +528,10 @@ class EpisodeUiTest : UiTestBase() {
             // In the reader: mark as played, which also counts as read.
             compose.onNodeWithText("Folge Eins").performClick()
             waitFor("Abspielen")
+            // Speed right in the episode panel: shows the current one, a tap takes the next.
+            compose.onNodeWithText("1,5×").performClick()
+            eventually("next speed") { context.container.settings.current.playbackSpeed == 1.8f }
+            compose.onNodeWithContentDescription("Herunterladen").assertIsDisplayed()
             compose.onNodeWithContentDescription("Als gehört markieren").performClick()
             compose.waitUntil(5_000) { runBlocking { repo.articleDao.byId(id)!!.playedAt } > 0 }
             assertTrue(runBlocking { repo.articleDao.byId(id)!!.read })
@@ -537,5 +542,50 @@ class EpisodeUiTest : UiTestBase() {
             service.onDestroy()
             server.shutdown()
         }
+    }
+}
+
+class ArchiveUiTest : UiTestBase() {
+    private fun archivedAt(n: Int) = runBlocking {
+        repo.articleDao.byGuid(repo.feedDao.all().first().id, "g$n")!!.archivedAt
+    }
+
+    @Test(timeout = 120000)
+    fun swipingArchivesWithUndoAndTheArchiveListsThem() {
+        waitFor("Artikel Nummer 1")
+        compose.onNodeWithText("Artikel Nummer 1").performTouchInput { swipeLeft() }
+        compose.waitUntil(5_000) { archivedAt(1) > 0 }
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Artikel Nummer 1").fetchSemanticsNodes().isEmpty() }
+
+        // Undo brings it back.
+        compose.onNodeWithText("Rückgängig").performClick()
+        compose.waitUntil(5_000) { archivedAt(1) == 0L }
+        waitFor("Artikel Nummer 1")
+        // Back in place, not left swiped away.
+        compose.onNodeWithText("Artikel Nummer 1").assertIsDisplayed()
+
+        compose.onNodeWithText("Artikel Nummer 2").performTouchInput { swipeLeft() }
+        compose.waitUntil(5_000) { archivedAt(2) > 0 }
+
+        // The archive in the drawer has it; swiping there brings it back.
+        compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
+        compose.onNodeWithText("Archiv").performClick()
+        waitFor("Artikel Nummer 2")
+        // Let the drawer finish closing, or the swipe would go to it.
+        compose.mainClock.advanceTimeBy(2_000)
+        compose.waitForIdle()
+        assertEquals(1, compose.onAllNodesWithText("Artikel Nummer", substring = true).fetchSemanticsNodes().size)
+        compose.onNodeWithText("Artikel Nummer 2").performTouchInput { swipeLeft() }
+        compose.waitUntil(5_000) { archivedAt(2) == 0L }
+        waitFor("Das Archiv ist leer.")
+
+        // From the reader: archiving goes back to the list.
+        compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
+        compose.onNodeWithText("Alle Artikel").performClick()
+        compose.onNodeWithText("Artikel Nummer 3").performClick()
+        compose.onNodeWithContentDescription("Archivieren").performClick()
+        compose.waitUntil(5_000) { archivedAt(3) > 0 }
+        waitFor("Artikel Nummer 4")
+        assertTrue(compose.onAllNodesWithText("Artikel Nummer 3").fetchSemanticsNodes().isEmpty())
     }
 }

@@ -47,9 +47,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        // Streams run for an hour or more: no limit on the whole call, unlike feed downloads.
-        val http = container.http.newBuilder().callTimeout(0, java.util.concurrent.TimeUnit.SECONDS).build()
-        val dataSources = DefaultDataSource.Factory(this, OkHttpDataSource.Factory(http))
+        val dataSources = DefaultDataSource.Factory(this, OkHttpDataSource.Factory(container.mediaHttp))
         val player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(dataSources).setLoadErrorHandlingPolicy(NoRetryOnClientError()),
@@ -168,7 +166,11 @@ class PlaybackService : MediaSessionService() {
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState != Player.STATE_ENDED) return
             val id = currentArticleId() ?: return
-            repo.scope.launch { repo.setPlayed(id, true) }
+            val downloads = container.downloads
+            repo.scope.launch {
+                repo.setPlayed(id, true)
+                downloads.onPlayed(id)
+            }
         }
 
         override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {

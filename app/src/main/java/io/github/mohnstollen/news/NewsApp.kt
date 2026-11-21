@@ -10,10 +10,14 @@ import io.github.mohnstollen.news.data.Repository
 import io.github.mohnstollen.news.data.SettingsStore
 import io.github.mohnstollen.news.data.SyncManager
 import io.github.mohnstollen.news.data.newHttpClient
+import io.github.mohnstollen.news.playback.Downloads
 import io.github.mohnstollen.news.work.RefreshWorker
+import java.util.concurrent.TimeUnit
 
 class AppContainer(app: Application) {
     val http = newHttpClient()
+    /** For episodes: streams and downloads run for a long time, unlike feed requests. */
+    val mediaHttp = http.newBuilder().callTimeout(0, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
     private val db = Room.databaseBuilder(app, AppDatabase::class.java, "news.db")
         .addMigrations(*AppDatabase.MIGRATIONS)
         .build()
@@ -21,6 +25,12 @@ class AppContainer(app: Application) {
     val repository = Repository(db, FeedFetcher(http), FullTextExtractor(http), settings)
     val sync = SyncManager(http, settings, repository)
     val loginFlow = NcLoginFlow(http, settings, sync, repository)
+    val downloads = Downloads(app, repository, settings)
+
+    init {
+        repository.onNewEpisodes = downloads::enqueueNewEpisodes
+        repository.onFeedDeleting = downloads::deleteFiles
+    }
 }
 
 open class NewsApp : Application() {

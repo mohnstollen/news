@@ -50,7 +50,17 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -86,7 +96,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import io.github.mohnstollen.news.data.ANY
+import io.github.mohnstollen.news.data.ARCHIVED
 import io.github.mohnstollen.news.data.ArticleListItem
+import io.github.mohnstollen.news.data.NOT_ARCHIVED
+import io.github.mohnstollen.news.playback.DownloadProgress
 import io.github.mohnstollen.news.data.FeedWithUnread
 import io.github.mohnstollen.news.data.ReadVisibility
 import io.github.mohnstollen.news.data.SearchQuery
@@ -113,6 +127,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     sealed interface ListScope {
         data object All : ListScope
         data object Starred : ListScope
+        /** Archived articles: left out of all other lists. */
+        data object Archive : ListScope
         data class Single(val feedId: Long) : ListScope
     }
 
@@ -139,6 +155,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
     val starredTotal = repo.articleDao.observeStarredCount()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    val downloads = container.downloads.progress
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    /** Archiving from the list, for the "undo" of the snackbar: (message, ids, archived). */
+    val archived = MutableSharedFlow<Triple<String, List<Long>, Boolean>>(extraBufferCapacity = 4)
 
     /** Quick filter: only articles published within [RECENT_WINDOW_MS]. */
     private val _recentOnly = MutableStateFlow(false)
@@ -181,15 +202,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 ) { hits, listPrefs -> if (listPrefs.newestFirst) hits else hits.asReversed() }
             }
             combine(
-                repo.articleDao.observeList((scope as? ListScope.Single)?.feedId, scope is ListScope.Starred),
+                repo.articleDao.observeList(
+                    (scope as? ListScope.Single)?.feedId,
+                    scope is ListScope.Starred,
+                    when (scope) {
+                        ListScope.Archive -> ARCHIVED
+                        // A starred article stays in the starred list even when archived.
+                        ListScope.Starred -> ANY
+                        else -> NOT_ARCHIVED
+                    },
+                ),
                 filter,
                 keepVisible,
                 _recentOnly,
                 _folder,
             ) { all, (unreadOnly, newestFirst, hideReadAfter), keep, recentOnly, folder ->
                 val now = System.currentTimeMillis()
-                // The quick filters belong to the article lists; the starred list shows everything.
-                val filterable = scope !is ListScope.Starred
+                // The quick filters belong to the article lists; starred and archive show everything.
+                val filterable = scope !is ListScope.Starred && scope !is ListScope.Archive
                 val since = if (recentOnly && filterable) now - RECENT_WINDOW_MS else null
                 val inFolder = folder.takeIf { scope is ListScope.All }
                 val filtered = all.filter { item ->
@@ -240,6 +270,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleRead(item: ArticleListItem) {
         keepVisible.update { it + item.id }
         viewModelScope.launch { repo.setRead(listOf(item.id), !item.read) }
+    }
+
+    /** Archives an article, or brings it back from the archive; offers to undo. */
+    fun toggleArchived(item: ArticleListItem) = setArchived(listOf(item.id), !item.archived, announce = true)
+
+    fun setArchived(ids: List<Long>, archived: Boolean, announce: Boolean = false) {
+        viewModelScope.launch {
+            repo.setArchived(ids, archived)
+            if (archived) container.downloads.delete(ids)
+            if (announce) this@MainViewModel.archived.tryEmit(Triple(if (archived) "Archiviert" else "Aus dem Archiv geholt", ids, archived))
+        }
     }
 
     fun toggleStar(item: ArticleListItem) {
@@ -327,6 +368,13 @@ fun ArticleListScreen(
     var confirmMarkAll by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
+    LaunchedEffect(Unit) {
+        vm.archived.collect { (message, ids, archived) ->
+            val result = snackbar.showSnackbar(message, actionLabel = "Rückgängig", duration = SnackbarDuration.Short)
+            if (result == SnackbarResult.ActionPerformed) vm.setArchived(ids, !archived)
+        }
+    }
+    val downloads by vm.downloads.collectAsStateWithLifecycle()
     BackHandler(enabled = searching) { vm.closeSearch() }
     BackHandler(enabled = drawerState.isOpen) { coroutineScope.launch { drawerState.close() } }
     // The selected feed was deleted in the meantime.
@@ -338,6 +386,7 @@ fun ArticleListScreen(
     val title = when (val s = scope) {
         ListScope.All -> "Alle Artikel"
         ListScope.Starred -> "Gemerkt"
+        ListScope.Archive -> "Archiv"
         is ListScope.Single -> feeds.firstOrNull { it.feed.id == s.feedId }?.feed?.title ?: "Feed"
     }
 
@@ -389,8 +438,10 @@ fun ArticleListScreen(
                         IconButton(onClick = vm::openSearch) {
                             Icon(Icons.Default.Search, contentDescription = "Suchen")
                         }
-                        IconButton(onClick = { confirmMarkAll = true }) {
-                            Icon(AppIcons.DoneAll, contentDescription = "Alle als gelesen markieren")
+                        if (scope != ListScope.Archive) {
+                            IconButton(onClick = { confirmMarkAll = true }) {
+                                Icon(AppIcons.DoneAll, contentDescription = "Alle als gelesen markieren")
+                            }
                         }
                         IconButton(onClick = vm::refresh, enabled = !refreshing) {
                             Icon(Icons.Default.Refresh, contentDescription = "Aktualisieren")
@@ -415,7 +466,7 @@ fun ArticleListScreen(
             },
         ) { padding ->
           Column(Modifier.padding(padding).fillMaxSize()) {
-            if (!searching && scope !is ListScope.Starred && feeds.isNotEmpty()) {
+            if (!searching && scope !is ListScope.Starred && scope !is ListScope.Archive && feeds.isNotEmpty()) {
                 QuickFilters(
                     unreadOnly = prefs.unreadOnly,
                     onUnreadOnly = vm::setUnreadOnly,
@@ -440,6 +491,8 @@ fun ArticleListScreen(
                             hasQuery -> "Keine Treffer für „${search.orEmpty().trim()}“."
                             feeds.isEmpty() -> "Noch keine Feeds abonniert."
                             scope is ListScope.Starred -> "Noch keine Artikel gemerkt.\nTippe bei einem Artikel auf den Stern."
+                            scope is ListScope.Archive ->
+                                "Das Archiv ist leer.\nWische einen Artikel in der Liste nach links, um ihn zu archivieren."
                             narrowed -> "Keine Artikel für diese Filter."
                             prefs.unreadOnly || prefs.hideReadAfterMinutes != ReadVisibility.NEVER ->
                                 "Keine ungelesenen Artikel."
@@ -456,6 +509,8 @@ fun ArticleListScreen(
                         onOpen = { onOpenArticle(it.id) },
                         onToggleRead = vm::toggleRead,
                         onToggleStar = vm::toggleStar,
+                        onToggleArchived = vm::toggleArchived,
+                        downloads = downloads,
                     )
                 }
             }
@@ -615,6 +670,8 @@ private fun ArticleList(
     onOpen: (ArticleListItem) -> Unit,
     onToggleRead: (ArticleListItem) -> Unit,
     onToggleStar: (ArticleListItem) -> Unit,
+    onToggleArchived: (ArticleListItem) -> Unit,
+    downloads: Map<Long, DownloadProgress>,
 ) {
     val listState = rememberSaveable(listKey, saver = LazyListState.Saver) { LazyListState() }
     val currentItems by rememberUpdatedState(items)
@@ -653,23 +710,75 @@ private fun ArticleList(
     val now = remember(items) { System.currentTimeMillis() }
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
         items(items, key = { it.id }) { item ->
-            ArticleRow(
-                item = item,
-                now = now,
-                modifier = Modifier.combinedClickable(
-                    onClick = { onOpen(item) },
-                    onLongClick = { onToggleRead(item) },
-                    onLongClickLabel = if (item.read) "Als ungelesen markieren" else "Als gelesen markieren",
-                ),
-                onToggleStar = { onToggleStar(item) },
-            )
+            ArchiveSwipe(item, onArchive = { onToggleArchived(item) }) {
+                ArticleRow(
+                    item = item,
+                    now = now,
+                    download = downloads[item.id],
+                    modifier = Modifier
+                        .background(MaterialTheme.colorScheme.surface)
+                        .combinedClickable(
+                            onClick = { onOpen(item) },
+                            onLongClick = { onToggleRead(item) },
+                            onLongClickLabel = if (item.read) "Als ungelesen markieren" else "Als gelesen markieren",
+                        )
+                        .semantics {
+                            customActions = listOf(
+                                CustomAccessibilityAction(if (item.archived) "Aus dem Archiv holen" else "Archivieren") {
+                                    onToggleArchived(item); true
+                                },
+                            )
+                        },
+                    onToggleStar = { onToggleStar(item) },
+                )
+            }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
         }
     }
 }
 
+/** Swiping a row to the left archives it, or in the archive brings it back. */
 @Composable
-private fun ArticleRow(item: ArticleListItem, now: Long, modifier: Modifier, onToggleStar: () -> Unit) {
+private fun ArchiveSwipe(item: ArticleListItem, onArchive: () -> Unit, content: @Composable () -> Unit) {
+    val currentOnArchive by rememberUpdatedState(onArchive)
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = {
+            if (it == SwipeToDismissBoxValue.EndToStart) currentOnArchive()
+            // Never settle as dismissed: the list keeps this state per article, and a row that comes
+            // back (undo, archive view) would stay swiped away. The list removes the row itself.
+            false
+        },
+    )
+    SwipeToDismissBox(
+        state = state,
+        enableDismissFromStartToEnd = false,
+        backgroundContent = {
+            Row(
+                Modifier.fillMaxSize().background(MaterialTheme.colorScheme.secondaryContainer).padding(horizontal = 24.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val label = if (item.archived) "Wiederherstellen" else "Archivieren"
+                Text(label, color = MaterialTheme.colorScheme.onSecondaryContainer, style = MaterialTheme.typography.labelLarge)
+                Spacer(Modifier.width(8.dp))
+                Icon(
+                    if (item.archived) AppIcons.Unarchive else AppIcons.Archive,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+        },
+    ) { content() }
+}
+
+@Composable
+private fun ArticleRow(
+    item: ArticleListItem,
+    now: Long,
+    download: DownloadProgress?,
+    modifier: Modifier,
+    onToggleStar: () -> Unit,
+) {
     val colors = MaterialTheme.colorScheme
     val titleColor = if (item.read) colors.onSurfaceVariant.copy(alpha = 0.75f) else colors.onSurface
     val secondary = colors.onSurfaceVariant.copy(alpha = if (item.read) 0.6f else 1f)
@@ -708,6 +817,8 @@ private fun ArticleRow(item: ArticleListItem, now: Long, modifier: Modifier, onT
                     durationSeconds = item.durationSeconds,
                     playPosition = item.playPosition,
                     playedAt = item.playedAt,
+                    downloaded = item.downloaded,
+                    download = download,
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
@@ -773,6 +884,15 @@ private fun FeedDrawer(
                     badge = { CountBadge(starredTotal) },
                     selected = selected == ListScope.Starred,
                     onClick = { onSelect(ListScope.Starred) },
+                    modifier = itemPadding,
+                )
+            }
+            item {
+                NavigationDrawerItem(
+                    label = { Text("Archiv") },
+                    icon = { Icon(AppIcons.Archive, contentDescription = null) },
+                    selected = selected == ListScope.Archive,
+                    onClick = { onSelect(ListScope.Archive) },
                     modifier = itemPadding,
                 )
             }

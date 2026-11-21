@@ -24,6 +24,9 @@ data class RefreshResult(
     val notifyIds: List<Long> = emptyList(),
 )
 
+/** At most this many new episodes per feed and update are downloaded automatically. */
+private const val MAX_AUTO_DOWNLOADS = 5
+
 class Repository(
     private val db: AppDatabase,
     private val fetcher: FeedFetcher,
@@ -43,6 +46,15 @@ class Repository(
 
     // ---- refresh ----------------------------------------------------------------------------
 
+    /**
+     * Gets the new articles of feeds with automatic downloads after each update, whoever started
+     * it. Set by the app; it picks out the episodes.
+     */
+    var onNewEpisodes: (suspend (List<Long>) -> Unit)? = null
+
+    /** Gets the downloaded files of a feed before it is deleted; set by the app. */
+    var onFeedDeleting: (suspend (List<String>) -> Unit)? = null
+
     suspend fun refreshAll(): RefreshResult = refresh(null)
 
     /** Refreshes one feed, or all if [feedId] is null. Does nothing if a refresh is already running. */
@@ -55,6 +67,9 @@ class Repository(
             val results = coroutineScope {
                 feeds.map { feed -> async { parallel.withPermit { feed to refreshFeed(feed) } } }.awaitAll()
             }
+            val autoDownload = results.filter { it.first.autoDownload }
+                .flatMap { it.second.orEmpty().take(MAX_AUTO_DOWNLOADS) }
+            if (autoDownload.isNotEmpty()) onNewEpisodes?.invoke(autoDownload)
             RefreshResult(
                 newArticles = results.sumOf { it.second?.size ?: 0 },
                 failedFeeds = results.count { it.second == null },
@@ -195,6 +210,7 @@ class Repository(
         category: String?,
         fetchFullText: Boolean,
         notify: Boolean? = null,
+        autoDownload: Boolean? = null,
     ) =
         withContext(Dispatchers.IO) {
             val feed = feedDao.byId(id) ?: return@withContext
@@ -214,10 +230,16 @@ class Repository(
                 }
                 feedDao.updateSubscription(id, title.trim(), newUrl, category?.trim()?.ifBlank { null }, fetchFullText, now)
                 if (notify != null) feedDao.setNotify(id, notify)
+                if (autoDownload != null) feedDao.setAutoDownload(id, autoDownload)
             }
         }
 
-    suspend fun deleteFeed(id: Long) = db.withTransaction {
+    suspend fun deleteFeed(id: Long) {
+        onFeedDeleting?.invoke(articleDao.downloadPaths(id))
+        deleteFeedRows(id)
+    }
+
+    private suspend fun deleteFeedRows(id: Long) = db.withTransaction {
         val feed = feedDao.byId(id) ?: return@withTransaction
         feedDao.delete(id)
         feedDao.putTombstone(DeletedFeed(feed.url, System.currentTimeMillis()))
@@ -267,7 +289,18 @@ class Repository(
         val now = System.currentTimeMillis()
         db.withTransaction {
             articleDao.setPlayed(id, if (played) now else 0)
-            if (played) articleDao.markReadIfUnread(id, now)
+            if (played) articleDao.markReadIfUnread(listOf(id), now)
+        }
+    }
+
+    /** Archived articles leave the lists and count as read; the search and the archive still show them. */
+    suspend fun setArchived(ids: List<Long>, archived: Boolean) {
+        val now = System.currentTimeMillis()
+        db.withTransaction {
+            ids.chunked(MAX_SQL_VARIABLES).forEach {
+                articleDao.setArchived(it, if (archived) now else 0)
+                if (archived) articleDao.markReadIfUnread(it, now)
+            }
         }
     }
 

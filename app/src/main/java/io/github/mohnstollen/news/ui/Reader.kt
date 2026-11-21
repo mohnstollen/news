@@ -56,12 +56,14 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.mohnstollen.news.data.Article
 import io.github.mohnstollen.news.data.Feed
+import io.github.mohnstollen.news.playback.DownloadProgress
 import io.github.mohnstollen.news.playback.Episodes
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -79,6 +81,9 @@ class ReaderViewModel(app: Application, handle: SavedStateHandle) : AndroidViewM
     /** Show the extracted page instead of the feed's own text, when there is one. */
     val preferFullText = MutableStateFlow(true)
     val messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    private val downloads = app.container.downloads
+    val download = downloads.progress.map { it[id] }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     init {
         viewModelScope.launch {
@@ -101,7 +106,32 @@ class ReaderViewModel(app: Application, handle: SavedStateHandle) : AndroidViewM
 
     fun togglePlayed() {
         val a = article.value ?: return
-        viewModelScope.launch { repo.setPlayed(id, a.playedAt == 0L) }
+        viewModelScope.launch {
+            val played = a.playedAt == 0L
+            repo.setPlayed(id, played)
+            if (played) downloads.onPlayed(id)
+        }
+    }
+
+    fun download() = downloads.enqueue(listOf(id))
+
+    fun cancelDownload() = downloads.cancel(id)
+
+    fun deleteDownload() {
+        viewModelScope.launch { downloads.delete(listOf(id)) }
+    }
+
+    /** Archiving leaves the article, like marking it unread; the archive in the drawer has it. */
+    fun toggleArchived(then: () -> Unit) {
+        val a = article.value ?: return
+        viewModelScope.launch {
+            val archive = a.archivedAt == 0L
+            repo.setArchived(listOf(id), archive)
+            if (archive) {
+                downloads.delete(listOf(id))
+                then()
+            }
+        }
     }
 
     fun markUnread(then: () -> Unit) {
@@ -205,6 +235,13 @@ fun ReaderScreen(onBack: () -> Unit, onOpenArticle: (Long) -> Unit, vm: ReaderVi
                             )
                         }
                     }
+                    IconButton(onClick = { vm.toggleArchived(onBack) }) {
+                        if (a.archivedAt > 0) {
+                            Icon(AppIcons.Unarchive, contentDescription = "Aus dem Archiv holen")
+                        } else {
+                            Icon(AppIcons.Archive, contentDescription = "Archivieren")
+                        }
+                    }
                     IconButton(onClick = { vm.markUnread(onBack) }) {
                         Icon(AppIcons.MarkUnread, contentDescription = "Als ungelesen markieren")
                     }
@@ -213,7 +250,10 @@ fun ReaderScreen(onBack: () -> Unit, onOpenArticle: (Long) -> Unit, vm: ReaderVi
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-          if (a?.enclosureUrl != null) EpisodePanel(a, onTogglePlayed = vm::togglePlayed)
+          if (a?.enclosureUrl != null) {
+              val download by vm.download.collectAsStateWithLifecycle()
+              EpisodePanel(a, download, vm)
+          }
           Box(Modifier.weight(1f).fillMaxWidth()) {
             if (a != null) {
                 val colors = MaterialTheme.colorScheme
@@ -248,7 +288,7 @@ fun ReaderScreen(onBack: () -> Unit, onOpenArticle: (Long) -> Unit, vm: ReaderVi
 
 /** Play button and progress of a podcast episode, above its show notes. */
 @Composable
-private fun EpisodePanel(a: Article, onTogglePlayed: () -> Unit) {
+private fun EpisodePanel(a: Article, download: DownloadProgress?, vm: ReaderViewModel) {
     val state = playerState()
     // While this episode is loaded, the player knows better than the stored position.
     val live = state.articleId == a.id && state.durationMs > 0
@@ -272,7 +312,15 @@ private fun EpisodePanel(a: Article, onTogglePlayed: () -> Unit) {
                 Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        IconButton(onClick = onTogglePlayed) {
+        SpeedButton()
+        EpisodeDownloadButton(
+            downloaded = a.downloadPath != null,
+            download = download,
+            onDownload = vm::download,
+            onCancel = vm::cancelDownload,
+            onDelete = vm::deleteDownload,
+        )
+        IconButton(onClick = vm::togglePlayed) {
             Icon(
                 AppIcons.Played,
                 contentDescription = if (a.playedAt > 0) "Als nicht gehört markieren" else "Als gehört markieren",

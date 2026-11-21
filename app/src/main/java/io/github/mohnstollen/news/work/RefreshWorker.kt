@@ -32,6 +32,7 @@ class RefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         }
         val result = container.repository.refreshAll()
         NewsWidget.updateAll(applicationContext)
+        runCatching { container.downloads.cleanUp() }
         val manual = inputData.getBoolean(KEY_MANUAL, false)
         if (!manual && prefs.notifyNewArticles && result.notifyIds.isNotEmpty()) {
             val articles = container.repository.articleDao.listItems(result.notifyIds.take(500))

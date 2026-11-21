@@ -39,6 +39,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MenuAnchorType
+import android.text.format.Formatter
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Icon
@@ -168,6 +170,10 @@ fun SettingsScreen(onBack: () -> Unit) {
                 isValid = { it >= 0 },
                 onValid = { value -> settings.update { it.copy(retentionDays = value) } },
             )
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            SectionTitle("Podcasts")
+            PodcastSection(prefs = prefs, onChange = settings::update)
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SectionTitle("Nextcloud-Synchronisation")
@@ -492,6 +498,72 @@ private fun Context.openLoginPage(url: String) {
         CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(this, Uri.parse(url))
     } catch (e: ActivityNotFoundException) {
         Toast.makeText(this, "Kein Browser gefunden", Toast.LENGTH_LONG).show()
+    }
+}
+
+@Composable
+private fun PodcastSection(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit) {
+    val context = LocalContext.current
+    val downloads = context.container.downloads
+    val scope = rememberCoroutineScope()
+    // Recounted when downloads finish or are deleted.
+    val active by downloads.progress.collectAsStateWithLifecycle(emptyMap())
+    var usage by remember { mutableStateOf<Pair<Int, Long>?>(null) }
+    var refreshUsage by remember { mutableStateOf(0) }
+    LaunchedEffect(active.size, refreshUsage) { usage = downloads.usage() }
+    var confirmDelete by remember { mutableStateOf(false) }
+
+    SwitchRow(
+        title = "Downloads nur im WLAN",
+        subtitle = "Folgen werden erst geladen, wenn ein Netz ohne Volumenbegrenzung da ist.",
+        checked = prefs.downloadWifiOnly,
+        onChange = { value -> onChange { it.copy(downloadWifiOnly = value) } },
+    )
+    SwitchRow(
+        title = "Gehörte Folgen löschen",
+        subtitle = "Die Datei einer Folge wird gelöscht, sobald sie zu Ende gehört oder als gehört markiert ist.",
+        checked = prefs.deletePlayedDownloads,
+        onChange = { value -> onChange { it.copy(deletePlayedDownloads = value) } },
+    )
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+    ) {
+        val (count, bytes) = usage ?: (0 to 0L)
+        Text(
+            text = when (count) {
+                0 -> "Keine Folgen heruntergeladen"
+                1 -> "1 Folge heruntergeladen · " + Formatter.formatShortFileSize(context, bytes)
+                else -> "$count Folgen heruntergeladen · " + Formatter.formatShortFileSize(context, bytes)
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+        )
+        if (count > 0 || active.isNotEmpty()) TextButton(onClick = { confirmDelete = true }) { Text("Alle löschen") }
+    }
+    Text(
+        "Automatische Downloads schaltest du pro Feed ein: Feeds verwalten, Feed antippen.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+    )
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Alle Downloads löschen?") },
+            text = { Text("Die Folgen bleiben in der Liste und lassen sich weiter streamen.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    scope.launch {
+                        downloads.deleteAll()
+                        refreshUsage++
+                    }
+                }) { Text("Löschen") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Abbrechen") } },
+        )
     }
 }
 

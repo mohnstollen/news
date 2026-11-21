@@ -206,6 +206,30 @@ object AppIcons {
         )
     }
 
+    val Download: ImageVector by lazy { icon("Download", "M19,9h-4V3H9v6H5l7,7 7,-7zM5,18v2h14v-2H5z") }
+
+    val DownloadDone: ImageVector by lazy {
+        icon("DownloadDone", "M5,18h14v2H5v-2zM9.6,15.3L5,10.7l2,-1.9 2.6,2.6L17,4l2,2 -9.4,9.3z")
+    }
+
+    val Archive: ImageVector by lazy {
+        icon(
+            "Archive",
+            "M20.54,5.23l-1.39,-1.68C18.88,3.21 18.47,3 18,3H6c-0.47,0 -0.88,0.21 -1.16,0.55L3.46,5.23C3.17,5.57 3,6.02 3,6.5V19" +
+                "c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2V6.5c0,-0.48 -0.17,-0.93 -0.46,-1.27zM12,17.5L6.5,12H10v-2h4v2h3.5L12,17.5z" +
+                "M5.12,5l0.81,-1h12l0.94,1H5.12z",
+        )
+    }
+
+    val Unarchive: ImageVector by lazy {
+        icon(
+            "Unarchive",
+            "M20.55,5.22l-1.39,-1.68C18.88,3.21 18.47,3 18,3H6c-0.47,0 -0.88,0.21 -1.15,0.55L3.46,5.22C3.17,5.57 3,6.01 3,6.5V19" +
+                "c0,1.1 0.89,2 2,2h14c1.1,0 2,-0.9 2,-2V6.5c0,-0.49 -0.17,-0.93 -0.45,-1.28zM12,9.5l5.5,5.5H14v2h-4v-2H6.5L12,9.5z" +
+                "M5.12,5l0.82,-1h12l0.93,1H5.12z",
+        )
+    }
+
     val DoneAll: ImageVector by lazy {
         icon(
             "DoneAll",

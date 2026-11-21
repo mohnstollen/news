@@ -28,6 +28,13 @@ RSS-/Atom-Reader für Android (ab Android 8.0), geschrieben in Kotlin mit Jetpac
   Artikel. Wiedergabe im Hintergrund mit Mini-Player, Player mit Positionsregler und Geschwindigkeit
   (0,8× bis 2×), 10 s zurück / 30 s vor, Steuerung über Benachrichtigung, Sperrbildschirm, Kopfhörer
   und Bluetooth. Jede Folge merkt sich, wo sie aufgehört hat; zu Ende gehörte Folgen gelten als gelesen
+- **Downloads**: Folgen pro Stück herunterladen (Knopf im Artikel) oder pro Feed automatisch nach jedem
+  Update (Feeds verwalten → Feed antippen). Standardmäßig nur im WLAN; unterbrochene Downloads laufen
+  weiter, wo sie aufgehört haben. Gehörte Folgen werden auf Wunsch gelöscht; Belegung und „Alle löschen“
+  unter Einstellungen → Podcasts
+- **Archiv**: Artikel oder Folgen in der Liste nach links wischen (oder im Artikel oben archivieren), damit
+  sie aus allen Listen verschwinden. Mit „Rückgängig“, über das Archiv im Menü und über die Suche
+  zurückzuholen
 
 ## Bauen
 

@@ -41,6 +41,10 @@ data class Prefs(
     val lastSyncError: String? = null,
     /** Speed for podcast playback; 1 is normal. */
     val playbackSpeed: Float = 1f,
+    /** Episode downloads wait for a network without volume limit. */
+    val downloadWifiOnly: Boolean = true,
+    /** Delete an episode's file once it was played to the end. */
+    val deletePlayedDownloads: Boolean = true,
 ) {
     val syncConfigured: Boolean get() = ncServer.isNotBlank() && ncUser.isNotBlank()
 }
@@ -76,6 +80,8 @@ class SettingsStore(context: Context) {
             lastSync = sp.getLong("lastSync", d.lastSync),
             lastSyncError = sp.getString("lastSyncError", d.lastSyncError),
             playbackSpeed = sp.getFloat("playbackSpeed", d.playbackSpeed),
+            downloadWifiOnly = sp.getBoolean("downloadWifiOnly", d.downloadWifiOnly),
+            deletePlayedDownloads = sp.getBoolean("deletePlayedDownloads", d.deletePlayedDownloads),
         )
     }
 
@@ -102,6 +108,8 @@ class SettingsStore(context: Context) {
             .putLong("lastSync", p.lastSync)
             .putString("lastSyncError", p.lastSyncError)
             .putFloat("playbackSpeed", p.playbackSpeed)
+            .putBoolean("downloadWifiOnly", p.downloadWifiOnly)
+            .putBoolean("deletePlayedDownloads", p.deletePlayedDownloads)
             .apply()
         _flow.value = p
     }
