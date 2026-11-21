@@ -392,9 +392,10 @@ fun EpisodeDownloadButton(
 @Composable
 fun QueueButton(articleId: Long) {
     val repo = androidx.compose.ui.platform.LocalContext.current.container.repository
-    val ids by remember { repo.queueDao.observeIds() }.collectAsStateWithLifecycle(emptyList())
+    // null until the database answered: a tap before that would do the opposite of what it shows.
+    val ids by remember { repo.queueDao.observeIds() }.collectAsStateWithLifecycle(null)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val queued = articleId in ids
+    val queued = articleId in (ids ?: return)
     // The episode that is playing is not queued; adding it would play it twice.
     if (playerState().articleId == articleId && !queued) return
     IconButton(onClick = { scope.launch { if (queued) repo.dequeue(articleId) else repo.enqueue(articleId) } }) {

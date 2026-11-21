@@ -654,8 +654,12 @@ class QueueAndStatsUiTest : UiTestBase() {
 
         // In the reader, the queue button shows that it is queued and takes it out.
         compose.onNodeWithText("Episode 2").performClick()
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithContentDescription("Aus der Warteschlange nehmen").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitForIdle()
         compose.onNodeWithContentDescription("Aus der Warteschlange nehmen").performClick()
-        compose.waitUntil(5_000) { runBlocking { repo.queueDao.ids() }.isEmpty() }
+        compose.waitUntil(10_000) { runBlocking { repo.queueDao.ids() }.isEmpty() }
         compose.waitUntil(10_000) {
             compose.onAllNodesWithContentDescription("Zur Warteschlange hinzufügen").fetchSemanticsNodes().isNotEmpty()
         }
