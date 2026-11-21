@@ -1,63 +1,89 @@
-# News
+# News und Podfang
 
-RSS-/Atom-Reader für Android (ab Android 8.0), geschrieben in Kotlin mit Jetpack Compose.
+Zwei Android-Apps (ab Android 8.0) aus einer Codebasis, geschrieben in Kotlin mit Jetpack Compose:
 
-## Funktionen
+- **News**: RSS-/Atom-Reader
+- **Podfang**: Podcast-App
+
+Beide lassen sich nebeneinander installieren und haben getrennte Daten.
+
+## Aufbau
+
+| Modul | Inhalt |
+|---|---|
+| `core` | Gemeinsamer Kern: Feeds, Datenbank, Nextcloud-Sync, OPML, Bildschirme, Wiedergabe |
+| `app` | **News**: Paket `io.github.mohnstollen.news`, ohne Podcast-Funktionen, mit Widget |
+| `podfang` | **Podfang**: Paket `io.github.mohnstollen.podfang`, eigenes Symbol, ohne Widget |
+
+Was die Apps unterscheidet, steht in `core/…/AppFeatures.kt`: ob Podcast-Funktionen da sind,
+einige Bezeichnungen („Alle Artikel“ / „Alle Folgen“) und der Nextcloud-Ordner. Die
+App-Module wählen ihre Variante in ihrer Application-Klasse und entfernen in ihrem Manifest, was
+sie nicht brauchen.
+
+## Funktionen beider Apps
 
 - **Feeds** hinzufügen (mit Prüfung der Adresse; bei einer normalen Website wird der Feed
   gesucht), bearbeiten, in Ordner sortieren und löschen
-- **Anzeige**: alle Artikel, ein einzelner Feed oder die gemerkten Artikel; Sortierung nach
-  Datum (neueste oder älteste zuerst); Schnellfilter für Ungelesene, Artikel der letzten
+- **Anzeige**: alle Einträge, ein einzelner Feed oder die gemerkten; Sortierung nach
+  Datum (neueste oder älteste zuerst); Schnellfilter für Ungelesene, Einträge der letzten
   drei Stunden und einen Ordner
-- **Gelesen-Status**: automatisch beim Vorbeiscrollen (abschaltbar), per langem Druck auf einen
-  Artikel, oder alle Artikel der aktuellen Ansicht auf einmal
-- **Aufgeräumte Liste**: gelesene Artikel verschwinden nach einstellbarer Zeit aus den Listen
+- **Gelesen-Status**: automatisch beim Vorbeiscrollen (abschaltbar), per langem Druck,
+  oder alle Einträge der aktuellen Ansicht auf einmal
+- **Aufgeräumte Liste**: gelesene Einträge verschwinden nach einstellbarer Zeit aus den Listen
   (Standard: ein Tag) und bleiben über die Suche auffindbar
-- **Merken** (Stern), **Notiz** (Stift) und **Teilen** für jeden Artikel
-- **Offline**: Artikel liegen in einer lokalen Datenbank. Der **Volltext** der verlinkten Seite
-  lässt sich pro Artikel laden oder pro Feed automatisch bei jedem Update
+- **Archiv**: in der Liste nach links wischen (oder im Eintrag oben archivieren), damit er aus allen
+  Listen verschwindet. Mit „Rückgängig“, über das Archiv im Menü und über die Suche zurückzuholen
+- **Merken** (Stern), **Notiz** (Stift) und **Teilen**
+- **Offline**: alles liegt in einer lokalen Datenbank. Der **Volltext** der verlinkten Seite
+  lässt sich pro Eintrag laden oder pro Feed automatisch bei jedem Update
 - **Aktualisierung** im Hintergrund in einstellbarem Intervall (Standard 60 Minuten, auf Wunsch
   nur im WLAN) oder nur manuell
-- **Suche** über Titel, Text, Volltext und Notizen, in allen Artikeln oder im gewählten Feed
-- **Benachrichtigung** bei neuen Artikeln nach einem Hintergrund-Update (abschaltbar, auch pro Feed)
+- **Suche** über Titel, Text, Volltext und Notizen
+- **Benachrichtigung** bei Neuem nach einem Hintergrund-Update (abschaltbar, auch pro Feed)
+- **OPML** Import und Export
+- **Nextcloud** (WebDAV): gleicht Feeds, gemerkte Einträge und Notizen zwischen Geräten ab. News
+  nutzt standardmäßig den Ordner „News“, Podfang „Podfang“, damit sich die Abos nicht vermischen
+
+## Nur News
+
 - **Widget** für den Startbildschirm mit den neuesten ungelesenen Artikeln und eigenem,
   einstellbarem Aktualisierungsintervall
-- **OPML** Import und Export
-- **Nextcloud** (WebDAV): gleicht Feeds, gemerkte Artikel und Notizen zwischen Geräten ab
-- **Podcasts**: Folgen mit Audio- oder Videodatei bekommen einen Play-Knopf in der Liste und im
-  Artikel. Wiedergabe im Hintergrund mit Mini-Player, Player mit Positionsregler und Geschwindigkeit
-  (0,8× bis 2×), 10 s zurück / 30 s vor, Steuerung über Benachrichtigung, Sperrbildschirm, Kopfhörer
-  und Bluetooth. Jede Folge merkt sich, wo sie aufgehört hat; zu Ende gehörte Folgen gelten als gelesen
-- **Downloads**: Folgen pro Stück herunterladen (Knopf im Artikel) oder pro Feed automatisch nach jedem
-  Update, einstellbar schon beim Abonnieren oder später unter Feeds verwalten → Feed antippen. Standardmäßig nur im WLAN; unterbrochene Downloads laufen
-  weiter, wo sie aufgehört haben. Gehörte Folgen werden auf Wunsch gelöscht, auf Wunsch schon kurz vor
-  dem Ende („Abspann überspringen“: die letzten 10 bis 120 Sekunden zählen als gehört); Belegung und „Alle löschen“
+
+## Nur Podfang
+
+- **Wiedergabe** im Hintergrund mit Mini-Player, Player mit Positionsregler und Geschwindigkeit
+  (0,8× bis 2×, auch direkt in der Folge umschaltbar), 10 s zurück / 30 s vor, Steuerung über
+  Benachrichtigung, Sperrbildschirm, Kopfhörer und Bluetooth. Jede Folge merkt sich, wo sie aufgehört
+  hat; zu Ende gehörte Folgen gelten als gelesen
+- **Downloads**: Folgen pro Stück herunterladen (Knopf in der Folge) oder pro Podcast automatisch nach
+  jedem Update, einstellbar schon beim Abonnieren oder später unter Podcasts verwalten → Podcast
+  antippen. Standardmäßig nur im WLAN; unterbrochene Downloads laufen weiter, wo sie aufgehört haben.
+  Gehörte Folgen werden auf Wunsch gelöscht, auf Wunsch schon kurz vor dem Ende („Abspann
+  überspringen“: die letzten 10 bis 120 Sekunden zählen als gehört); Belegung und „Alle löschen“
   unter Einstellungen → Podcasts
-- **Warteschlange**: Folgen im Artikel einreihen oder in der Liste nach rechts wischen; sie laufen
-  nacheinander, wenn eine Folge zu Ende ist. Reihenfolge ändern und entfernen unter „Warteschlange“ im Menü
+- **Warteschlange**: Folgen in der Folge einreihen oder in der Liste nach rechts wischen; sie laufen
+  nacheinander. Reihenfolge ändern und entfernen unter „Warteschlange“ im Menü
 - **Sleep-Timer** im Player: 5 bis 90 Minuten oder bis zum Ende der Folge, mit sanftem Ausblenden
 - **Statistik**: Hörzeit dieser Woche, dieses Monats, dieses Jahres und insgesamt, Lieblingspodcast,
-  meistgehörte Podcasts, die letzten 7 Tage, zu Ende gehörte Folgen und durch Geschwindigkeit gesparte Zeit.
-  Bleibt erhalten, wenn ein Podcast abbestellt wird
+  meistgehörte Podcasts, die letzten 7 Tage, zu Ende gehörte Folgen und durch Geschwindigkeit
+  gesparte Zeit. Bleibt erhalten, wenn ein Podcast abbestellt wird
 - **Podcasts entdecken**: Suche im öffentlichen Podcast-Katalog von Apple und Vorschläge passend zu den
   abonnierten Podcasts („Weil du … hörst“): gleiche Kategorie, Themen aus den Folgentiteln. Fragt den
   Katalog nur auf Knopfdruck; dabei gehen Podcast-Namen und Stichwörter an Apple, ohne Konto
-- **Archiv**: Artikel oder Folgen in der Liste nach links wischen (oder im Artikel oben archivieren), damit
-  sie aus allen Listen verschwinden. Mit „Rückgängig“, über das Archiv im Menü und über die Suche
-  zurückzuholen
 
 ## Bauen
 
 Benötigt JDK 17 oder neuer und das Android SDK (Plattform 35).
 
 ```bash
-./gradlew :app:assembleDebug
+./gradlew :app:assembleDebug :podfang:assembleDebug
 ```
 
-Die APK liegt danach unter `app/build/outputs/apk/debug/app-debug.apk`.
+Die APKs liegen danach unter `app/build/outputs/apk/debug/app-debug.apk` (News) und
+`podfang/build/outputs/apk/debug/podfang-debug.apk` (Podfang).
 
 ```bash
-./gradlew :app:testDebugUnitTest
+./gradlew :core:testDebugUnitTest
 ```
 
 ## Nextcloud-Synchronisation
@@ -66,7 +92,7 @@ In der App unter **Einstellungen → Nextcloud-Synchronisation** einer von drei 
 
 - **„Mit Nextcloud anmelden“** (am einfachsten): Server-Adresse eintragen, antippen, auf der
   Anmeldeseite der Nextcloud anmelden und „Zugriff gewähren“ (Login Flow v2). Die App erhält ein
-  eigenes App-Passwort „News (Android)“, speichert alles und synchronisiert. Die Seite öffnet sich
+  eigenes App-Passwort „News (Android)“ bzw. „Podfang (Android)“, speichert alles und synchronisiert. Die Seite öffnet sich
   als Custom Tab über der App; nach dem Schließen ist man zurück.
 - **„Mit QR-Code anmelden“**: In Nextcloud unter **Persönliche Einstellungen → Sicherheit** ein
   App-Passwort erstellen und **„QR-Code für mobile Apps anzeigen“**, dann den Code scannen.

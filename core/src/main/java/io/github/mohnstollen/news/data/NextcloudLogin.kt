@@ -104,6 +104,8 @@ class NcLoginFlow(
     private val repository: Repository,
     private val pollIntervalMs: Long = 2_000,
     private val timeoutMs: Long = 20 * 60_000,
+    /** How the app introduces itself; Nextcloud names the app password after it. */
+    private val clientName: String = CLIENT_NAME,
 ) {
     sealed interface State {
         data object Idle : State
@@ -126,7 +128,7 @@ class NcLoginFlow(
         cancel()
         val request = Request.Builder().url(initUrl(server))
             // Nextcloud names the new app password after this.
-            .header("User-Agent", CLIENT_NAME)
+            .header("User-Agent", clientName)
             .post(ByteArray(0).toRequestBody())
             .build()
         val init = try {
@@ -193,7 +195,7 @@ class NcLoginFlow(
     /** 404 means the user has not granted access yet. */
     private fun pollOnce(init: Init): NcCredentials? {
         val request = Request.Builder().url(init.endpoint)
-            .header("User-Agent", CLIENT_NAME)
+            .header("User-Agent", clientName)
             .post(FormBody.Builder().add("token", init.token).build())
             .build()
         client.newCall(request).execute().use { response ->
@@ -215,7 +217,7 @@ class NcLoginFlow(
         val message = try {
             settings.ncPassword = credentials.password
             settings.update {
-                it.copy(ncServer = credentials.server, ncUser = credentials.user, ncFolder = folder.trim().ifBlank { "News" })
+                it.copy(ncServer = credentials.server, ncUser = credentials.user, ncFolder = folder.trim().ifBlank { settings.defaultFolder })
             }
             val added = sync.sync()
             if (added > 0) repository.scope.launch { repository.refreshAll() }

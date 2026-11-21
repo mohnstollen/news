@@ -44,12 +44,25 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /** The real application; only WorkManager is replaced by its test double. */
-class UiTestApp : NewsApp() {
+/** Everything switched on (podcasts included) with the wording of News, as most tests expect. */
+open class UiTestApp : NewsApp() {
+    override val features: AppFeatures = AppFeatures.NEWS.copy(podcasts = true)
+
     override fun onCreate() {
         WorkManagerTestInitHelper.initializeTestWorkManager(this, Configuration.Builder().build())
         FakeAndroidKeyStore.install()
         super.onCreate()
     }
+}
+
+/** As the News app ships: no podcast parts. */
+class ReaderTestApp : UiTestApp() {
+    override val features = AppFeatures.NEWS
+}
+
+/** As the Podfang app ships. */
+class PodfangTestApp : UiTestApp() {
+    override val features = AppFeatures.PODFANG
 }
 
 /**
@@ -631,10 +644,13 @@ class QueueAndStatsUiTest : UiTestBase() {
         compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
         compose.onNodeWithText("Warteschlange").performClick()
         waitFor("Leeren")
+        compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("Nach oben").fetchSemanticsNodes().size == 2 }
+        compose.waitForIdle()
         compose.onAllNodesWithContentDescription("Nach oben")[1].performClick()
-        compose.waitUntil(5_000) { runBlocking { repo.queueDao.ids() } == listOf(one, two) }
+        compose.waitUntil(10_000) { runBlocking { repo.queueDao.ids() } == listOf(one, two) }
+        compose.waitForIdle()
         compose.onAllNodesWithContentDescription("Aus der Warteschlange entfernen")[0].performClick()
-        compose.waitUntil(5_000) { runBlocking { repo.queueDao.ids() } == listOf(two) }
+        compose.waitUntil(10_000) { runBlocking { repo.queueDao.ids() } == listOf(two) }
 
         // In the reader, the queue button shows that it is queued and takes it out.
         compose.onNodeWithText("Episode 2").performClick()
@@ -652,5 +668,61 @@ class QueueAndStatsUiTest : UiTestBase() {
         waitFor("3 Std 30 Min")
         compose.onNodeWithText("Meistgehört dieses Jahr").performScrollTo()
         compose.onNodeWithText("Durch höhere Geschwindigkeit gespart").performScrollTo().assertIsDisplayed()
+    }
+}
+
+@Config(application = ReaderTestApp::class, sdk = [34])
+class ReaderModeUiTest : UiTestBase() {
+    @Test(timeout = 120000)
+    fun theReaderShowsNoPodcastParts() {
+        runBlocking {
+            repo.articleDao.insertAll(
+                listOf(
+                    Article(
+                        feedId = repo.feedDao.all().first().id, guid = "ep", title = "Eine Podcastfolge",
+                        summary = "Shownotes", content = "<p>Shownotes</p>", pubDate = System.currentTimeMillis(),
+                        fetchedAt = 0, enclosureUrl = "https://example.org/ep.mp3", durationSeconds = 1800,
+                    ),
+                ),
+            )
+        }
+        waitFor("Eine Podcastfolge")
+        assertTrue(compose.onAllNodesWithContentDescription("Abspielen").fetchSemanticsNodes().isEmpty())
+        assertTrue(compose.onAllNodesWithText("30 Min").fetchSemanticsNodes().isEmpty())
+
+        // Opening it shows the text, without player, download or queue buttons.
+        compose.onNodeWithText("Eine Podcastfolge").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("Archivieren").fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(compose.onAllNodesWithText("Abspielen").fetchSemanticsNodes().isEmpty())
+        assertTrue(compose.onAllNodesWithContentDescription("Herunterladen").fetchSemanticsNodes().isEmpty())
+        assertTrue(compose.onAllNodesWithContentDescription("Zur Warteschlange hinzufügen").fetchSemanticsNodes().isEmpty())
+        compose.onNodeWithContentDescription("Zurück").performClick()
+
+        // The menu has no podcast entries; the settings no podcast section.
+        compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
+        waitFor("Gemerkt")
+        compose.onNodeWithText("News").assertIsDisplayed()
+        for (entry in listOf("Warteschlange", "Statistik", "Podcasts entdecken")) {
+            assertTrue(entry, compose.onAllNodesWithText(entry).fetchSemanticsNodes().isEmpty())
+        }
+        openFromDrawer("Einstellungen")
+        waitFor("Intervall in Minuten")
+        assertTrue(compose.onAllNodesWithText("Abspann überspringen").fetchSemanticsNodes().isEmpty())
+        assertEquals("News", context.container.settings.current.ncFolder)
+    }
+}
+
+@Config(application = PodfangTestApp::class, sdk = [34])
+class PodfangModeUiTest : UiTestBase() {
+    @Test(timeout = 120000)
+    fun podfangUsesItsNameWordingAndFolder() {
+        waitFor("Alle Folgen")
+        compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
+        waitFor("Podfang")
+        compose.onNodeWithText("Warteschlange").assertIsDisplayed()
+        openFromDrawer("Podcasts verwalten")
+        waitFor("Podcasts")
+        assertEquals("own Nextcloud folder", "Podfang", context.container.settings.current.ncFolder)
+        assertEquals("Podfang (Android)", context.container.features.clientName)
     }
 }

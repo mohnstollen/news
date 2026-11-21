@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Podfang: a landing net that has caught a microphone. Kept inside the adaptive icon's safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Mesh of the net bag -->
+    <group>
+        <clip-path android:pathData="M27,40C29,60 39,75 50,75C61,75 71,60 73,40z" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeAlpha="0.5"
+            android:strokeWidth="1.6"
+            android:pathData="M20,46L46,80M20,34L58,82M30,32L70,84M42,32L80,84M54,32L84,74M66,32L84,58M80,46L54,80M80,34L42,82M70,32L30,84M58,32L20,84M46,32L16,74M34,32L16,58" />
+    </group>
+    <!-- Outline of the bag -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:pathData="M27,40C29,60 39,75 50,75C61,75 71,60 73,40" />
+    <!-- Handle -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:pathData="M71,36L79,28" />
+    <!-- Rim, seen from the side -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:pathData="M27,39a23,7 0,1 0,46 0a23,7 0,1 0,-46 0" />
+    <!-- The microphone that was caught -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M45,48a5,5 0,0 1,10 0v8a5,5 0,0 1,-10 0z" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M41.5,56a8.5,8.5 0,0 0,17 0M50,64.5v3.5" />
+</vector>

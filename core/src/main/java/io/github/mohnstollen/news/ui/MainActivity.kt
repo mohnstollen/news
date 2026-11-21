@@ -33,6 +33,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import io.github.mohnstollen.news.AppContainer
+import io.github.mohnstollen.news.AppFeatures
 import io.github.mohnstollen.news.NewsApp
 import io.github.mohnstollen.news.playback.PlayerConnection
 import io.github.mohnstollen.news.widget.NewsWidget
@@ -45,10 +46,11 @@ class MainActivity : ComponentActivity() {
 
     /** Connected while the app is visible, so the screens can show and steer playback. */
     private val player by lazy { PlayerConnection(this) }
+    private val podcasts get() = container.features.podcasts
 
     override fun onStart() {
         super.onStart()
-        player.connect()
+        if (podcasts) player.connect()
     }
 
     private fun readIntent(intent: Intent?) {
@@ -68,7 +70,7 @@ class MainActivity : ComponentActivity() {
     /** Reading changes what the widget should list. */
     override fun onStop() {
         super.onStop()
-        player.release()
+        if (podcasts) player.release()
         val app = applicationContext
         container.repository.scope.launch { NewsWidget.updateAll(app) }
     }
@@ -84,7 +86,8 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) readIntent(intent)
         setContent {
             NewsTheme {
-              CompositionLocalProvider(LocalPlayer provides player) {
+              // Without podcasts there is no player; the player controls then show nothing.
+              CompositionLocalProvider(LocalPlayer provides player.takeIf { podcasts }) {
                 val nav = rememberNavController()
                 LaunchedEffect(requestedArticle.value) {
                     val id = requestedArticle.value ?: return@LaunchedEffect
@@ -137,6 +140,8 @@ fun NewsTheme(content: @Composable () -> Unit) {
 }
 
 val Context.container: AppContainer get() = (applicationContext as NewsApp).container
+
+val Context.features: AppFeatures get() = container.features
 
 fun Context.openInBrowser(url: String) {
     try {

@@ -83,6 +83,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -350,6 +351,7 @@ fun ArticleListScreen(
     onOpenSettings: () -> Unit,
     onOpenScreen: (String) -> Unit = {},
 ) {
+    val features = LocalContext.current.features
     val scope by vm.scope.collectAsStateWithLifecycle()
     val feeds by vm.feeds.collectAsStateWithLifecycle()
     val articles by vm.articles.collectAsStateWithLifecycle()
@@ -395,7 +397,7 @@ fun ArticleListScreen(
     }
 
     val title = when (val s = scope) {
-        ListScope.All -> "Alle Artikel"
+        ListScope.All -> features.allItems
         ListScope.Starred -> "Gemerkt"
         ListScope.Archive -> "Archiv"
         is ListScope.Single -> feeds.firstOrNull { it.feed.id == s.feedId }?.feed?.title ?: "Feed"
@@ -514,7 +516,7 @@ fun ArticleListScreen(
                                 "Keine ungelesenen Artikel."
                             else -> "Keine Artikel. Zum Aktualisieren nach unten ziehen."
                         },
-                        action = if (feeds.isEmpty() && !hasQuery) "Feed hinzufügen" to onOpenFeeds else null,
+                        action = if (feeds.isEmpty() && !hasQuery) features.addFeed to onOpenFeeds else null,
                     )
                     else -> ArticleList(
                         items = items,
@@ -779,7 +781,7 @@ private fun ArchiveSwipe(
     )
     SwipeToDismissBox(
         state = state,
-        enableDismissFromStartToEnd = item.hasAudio && !item.archived,
+        enableDismissFromStartToEnd = item.hasAudio && !item.archived && LocalContext.current.features.podcasts,
         backgroundContent = {
             if (state.dismissDirection == SwipeToDismissBoxValue.StartToEnd) {
                 Row(
@@ -854,7 +856,7 @@ private fun ArticleRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (item.hasAudio) {
+            if (item.hasAudio && LocalContext.current.features.podcasts) {
                 EpisodeStatus(
                     articleId = item.id,
                     durationSeconds = item.durationSeconds,
@@ -899,6 +901,7 @@ private fun FeedDrawer(
     onOpenScreen: (String) -> Unit,
 ) {
     val itemPadding = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+    val features = LocalContext.current.features
     // Feeds without a folder first, then folder by folder.
     val groups = remember(feeds) {
         feeds.groupBy { it.feed.category.orEmpty() }.toSortedMap(String.CASE_INSENSITIVE_ORDER)
@@ -907,14 +910,14 @@ private fun FeedDrawer(
         LazyColumn {
             item {
                 Text(
-                    "News",
+                    features.appName,
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.padding(start = 28.dp, top = 20.dp, bottom = 12.dp),
                 )
             }
             item {
                 NavigationDrawerItem(
-                    label = { Text("Alle Artikel") },
+                    label = { Text(features.allItems) },
                     icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
                     badge = { CountBadge(unreadTotal) },
                     selected = selected == ListScope.All,
@@ -941,7 +944,7 @@ private fun FeedDrawer(
                     modifier = itemPadding,
                 )
             }
-            item {
+            if (features.podcasts) item {
                 NavigationDrawerItem(
                     label = { Text("Warteschlange") },
                     icon = { Icon(AppIcons.QueueAdd, contentDescription = null) },
@@ -976,14 +979,14 @@ private fun FeedDrawer(
             item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
             item {
                 NavigationDrawerItem(
-                    label = { Text("Feeds verwalten") },
+                    label = { Text(features.manageFeeds) },
                     icon = { Icon(Icons.Default.Edit, contentDescription = null) },
                     selected = false,
                     onClick = onOpenFeeds,
                     modifier = itemPadding,
                 )
             }
-            item {
+            if (features.podcasts) item {
                 NavigationDrawerItem(
                     label = { Text("Statistik") },
                     icon = { Icon(AppIcons.Stats, contentDescription = null) },
@@ -992,7 +995,7 @@ private fun FeedDrawer(
                     modifier = itemPadding,
                 )
             }
-            item {
+            if (features.podcasts) item {
                 NavigationDrawerItem(
                     label = { Text("Podcasts entdecken") },
                     icon = { Icon(AppIcons.Explore, contentDescription = null) },

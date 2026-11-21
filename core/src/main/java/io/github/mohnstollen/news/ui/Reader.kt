@@ -250,7 +250,7 @@ fun ReaderScreen(onBack: () -> Unit, onOpenArticle: (Long) -> Unit, vm: ReaderVi
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-          if (a?.enclosureUrl != null) {
+          if (a?.enclosureUrl != null && context.features.podcasts) {
               val download by vm.download.collectAsStateWithLifecycle()
               EpisodePanel(a, download, vm)
           }

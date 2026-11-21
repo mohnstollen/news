@@ -51,7 +51,8 @@ data class Prefs(
     val syncConfigured: Boolean get() = ncServer.isNotBlank() && ncUser.isNotBlank()
 }
 
-class SettingsStore(context: Context) {
+/** [defaults] are used for what was never set, e.g. the app's own Nextcloud folder. */
+class SettingsStore(context: Context, private val defaults: Prefs = Prefs()) {
     private val sp = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val secrets = SecretStore(context)
 
@@ -60,8 +61,11 @@ class SettingsStore(context: Context) {
 
     val current: Prefs get() = _flow.value
 
+    /** The app's own Nextcloud folder, for an empty folder field. */
+    val defaultFolder: String get() = defaults.ncFolder
+
     private fun load(): Prefs {
-        val d = Prefs()
+        val d = defaults
         return Prefs(
             autoUpdate = sp.getBoolean("autoUpdate", d.autoUpdate),
             intervalMinutes = sp.getInt("intervalMinutes", d.intervalMinutes),

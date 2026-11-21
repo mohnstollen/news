@@ -172,9 +172,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                 onValid = { value -> settings.update { it.copy(retentionDays = value) } },
             )
 
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            SectionTitle("Podcasts")
-            PodcastSection(prefs = prefs, onChange = settings::update)
+            if (container.features.podcasts) {
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                SectionTitle("Podcasts")
+                PodcastSection(prefs = prefs, onChange = settings::update)
+            }
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SectionTitle("Nextcloud-Synchronisation")
@@ -184,7 +186,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 onSave = { server, user, password, folder ->
                     settings.ncPassword = password
                     settings.update {
-                        it.copy(ncServer = server.trim(), ncUser = user.trim(), ncFolder = folder.trim().ifBlank { "News" })
+                        it.copy(ncServer = server.trim(), ncUser = user.trim(), ncFolder = folder.trim().ifBlank { settings.defaultFolder })
                     }
                 },
                 onSync = {

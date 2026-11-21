@@ -130,7 +130,7 @@ fun FeedsScreen(onBack: () -> Unit) {
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text("Feeds") },
+                title = { Text(if (LocalContext.current.features.podcasts) "Podcasts" else "Feeds") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück")
@@ -158,7 +158,7 @@ fun FeedsScreen(onBack: () -> Unit) {
             ExtendedFloatingActionButton(
                 onClick = { addOpen = true },
                 icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("Feed hinzufügen") },
+                text = { Text(LocalContext.current.features.addFeed) },
             )
         },
     ) { padding ->
@@ -226,6 +226,7 @@ fun FeedsScreen(onBack: () -> Unit) {
 @Composable
 private fun FeedRow(entry: FeedWithUnread, onEdit: () -> Unit, onDelete: () -> Unit) {
     val feed = entry.feed
+    val podcasts = LocalContext.current.features.podcasts
     Row(
         modifier = Modifier.fillMaxWidth().clickable(onClickLabel = "Bearbeiten", onClick = onEdit)
             .padding(start = 16.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
@@ -245,7 +246,7 @@ private fun FeedRow(entry: FeedWithUnread, onEdit: () -> Unit, onDelete: () -> U
                 add(if (entry.unread == 1) "1 ungelesen" else "${entry.unread} ungelesen")
                 if (feed.fetchFullText) add("Volltext")
                 if (!feed.notify) add("stumm")
-                if (feed.autoDownload) add("lädt Folgen")
+                if (feed.autoDownload && podcasts) add("lädt Folgen")
                 add(
                     if (feed.lastFetched == 0L) "noch nicht geladen"
                     else "geladen " + DateUtils.getRelativeTimeSpanString(
@@ -321,7 +322,7 @@ private fun AddFeedDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Feed hinzufügen") },
+        title = { Text(LocalContext.current.features.addFeed) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
@@ -337,7 +338,7 @@ private fun AddFeedDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 FolderField(value = category, onChange = { category = it }, folders = folders, enabled = !busy)
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                if (LocalContext.current.features.podcasts) Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Folgen automatisch herunterladen")
                         Text(
@@ -451,7 +452,7 @@ private fun EditFeedDialog(
                     }
                     Switch(checked = notify, onCheckedChange = { notify = it }, enabled = !busy)
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                if (LocalContext.current.features.podcasts) Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Neue Folgen herunterladen")
                         Text(
