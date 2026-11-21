@@ -47,6 +47,10 @@ data class Prefs(
     val deletePlayedDownloads: Boolean = true,
     /** Seconds before the end at which an episode counts as played and the rest is skipped; 0 = off. */
     val endBufferSeconds: Int = 0,
+    /** A downloaded episode is put into the queue. */
+    val downloadEnqueues: Boolean = true,
+    /** An episode put into the queue is downloaded (on Wi-Fi if [downloadWifiOnly]). */
+    val queueDownloads: Boolean = true,
 ) {
     val syncConfigured: Boolean get() = ncServer.isNotBlank() && ncUser.isNotBlank()
 }
@@ -89,6 +93,8 @@ class SettingsStore(context: Context, private val defaults: Prefs = Prefs()) {
             downloadWifiOnly = sp.getBoolean("downloadWifiOnly", d.downloadWifiOnly),
             deletePlayedDownloads = sp.getBoolean("deletePlayedDownloads", d.deletePlayedDownloads),
             endBufferSeconds = sp.getInt("endBufferSeconds", d.endBufferSeconds),
+            downloadEnqueues = sp.getBoolean("downloadEnqueues", d.downloadEnqueues),
+            queueDownloads = sp.getBoolean("queueDownloads", d.queueDownloads),
         )
     }
 
@@ -118,6 +124,8 @@ class SettingsStore(context: Context, private val defaults: Prefs = Prefs()) {
             .putBoolean("downloadWifiOnly", p.downloadWifiOnly)
             .putBoolean("deletePlayedDownloads", p.deletePlayedDownloads)
             .putInt("endBufferSeconds", p.endBufferSeconds)
+            .putBoolean("downloadEnqueues", p.downloadEnqueues)
+            .putBoolean("queueDownloads", p.queueDownloads)
             .apply()
         _flow.value = p
     }

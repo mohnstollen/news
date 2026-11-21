@@ -54,10 +54,17 @@ sie nicht brauchen.
 
 ## Nur Podfang
 
-- **Tabs** unten: Podcasts, Warteschlange, Downloads, Einstellungen und „Mehr“ (Gemerkt, Archiv,
-  Statistik, Podcasts entdecken). Das Seitenmenü zeigt nur alle Folgen, die Podcasts und ihre Verwaltung
-- **Cover**: in der Folgen-Liste als Vorschaubild (dazu Titel, Podcast und Länge), groß im Player und
-  klein im Mini-Player; zwischengespeichert, also auch offline sichtbar
+- **Ablauf einer Folge**: Neue Folgen landen unter **Neu** (dem Eingang). Nach rechts wischen,
+  herunterladen oder abspielen bringt sie in die **Warteschlange**, nach links wischen ins **Archiv**
+  („nicht interessiert“). Eingereihte Folgen werden im WLAN geladen; heruntergeladene werden
+  eingereiht (beides abschaltbar). Zu Ende gehört verlässt eine Folge die Warteschlange, die Datei wird
+  auf Wunsch gelöscht
+- **Tabs** unten: Neu, Warteschlange, Podcasts (Cover-Raster der Abos) und „Mehr“ (Einstellungen,
+  Statistik, Podcasts entdecken, Gemerkt, Archiv). Kein Seitenmenü
+- **Podcast-Übersicht**: Cover, Erscheinungsrhythmus und alle Folgen mit Abspielen, Herunterladen und
+  Einreihen; Einstellungen des Podcasts und Abbestellen. Aus jeder Folge erreichbar
+- **Cover**: in den Listen als Vorschaubild, groß im Player und klein im Mini-Player; zwischengespeichert,
+  also auch offline sichtbar
 - **Kapitel** im Player: aus dem Feed (Podlove Simple Chapters), aus einer verlinkten Kapiteldatei
   (Podcasting 2.0) oder aus der MP3-Datei (ID3); aktuelles Kapitel, Liste zum Springen, vorheriges
   und nächstes Kapitel
@@ -71,11 +78,12 @@ sie nicht brauchen.
   Gehörte Folgen werden auf Wunsch gelöscht, auf Wunsch schon kurz vor dem Ende („Abspann
   überspringen“: die letzten 10 bis 120 Sekunden zählen als gehört); Belegung und „Alle löschen“
   unter Einstellungen → Podcasts
-- **Warteschlange**: Folgen in der Folge einreihen oder in der Liste nach rechts wischen; sie laufen
-  nacheinander. Länge jeder Folge und verbleibende Gesamtzeit; Reihenfolge ändern und entfernen.
+- **Warteschlange**: Länge jeder Folge und verbleibende Gesamtzeit; nach rechts wischen schiebt ans Ende
+  („später“), nach links wischen nimmt heraus (mit Rückgängig); Reihenfolge mit Pfeilen ändern.
+  Die laufende Folge bleibt drin, bis sie zu Ende gehört ist.
   Längen, die der Feed nicht nennt, lernt die App beim Abspielen
-- **Downloads**-Ansicht: alle heruntergeladenen Folgen mit Gesamtlänge und Speicherbedarf, laufende
-  Downloads mit Fortschritt
+- **Downloads**: Knopf an jeder Folge. Übersicht aller heruntergeladenen Folgen mit Gesamtlänge und
+  Speicherbedarf unter Einstellungen → Podcasts → „Ansehen“
 - **Sleep-Timer** im Player: 5 bis 90 Minuten oder bis zum Ende der Folge, mit sanftem Ausblenden
 - **Statistik**: Hörzeit dieser Woche, dieses Monats, dieses Jahres und insgesamt, Lieblingspodcast,
   meistgehörte Podcasts, die letzten 7 Tage, zu Ende gehörte Folgen und durch Geschwindigkeit

@@ -167,7 +167,7 @@ class PlaybackServiceTest {
         }
         runBlocking {
             assertTrue("first marked played", repo.articleDao.byId(first)!!.playedAt > 0)
-            assertTrue("queue used up", repo.queueDao.ids().isEmpty())
+            assertEquals("the finished one left, the playing one stays until it ends", listOf(second), repo.queueDao.ids())
         }
         waitFor("finished counted") {
             runBlocking { repo.listenDao.observeTotals(0).first().finished } >= 1

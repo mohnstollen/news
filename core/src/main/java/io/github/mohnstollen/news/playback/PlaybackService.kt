@@ -187,8 +187,9 @@ class PlaybackService : MediaSessionService() {
                 val (item, savedPosition) = Episodes.resolve(wanted.mediaId, repo.articleDao, repo.feedDao, endBufferMs())
                     ?: throw IllegalArgumentException("Folge ${wanted.mediaId} hat keine Audiodatei")
                 val start = if (startPositionMs == C.TIME_UNSET) savedPosition else startPositionMs
-                // Playing an episode takes it out of the queue.
-                wanted.mediaId.toLongOrNull()?.let { repo.dequeue(it) }
+                // What is being listened to is in the queue, at the top if it was not yet there.
+                // Not downloaded for that: it is streaming already.
+                wanted.mediaId.toLongOrNull()?.let { repo.enqueueIfAbsent(it, next = true, handOn = false) }
                 MediaSession.MediaItemsWithStartPosition(listOf(item), 0, start)
             }
         }
@@ -251,7 +252,8 @@ class PlaybackService : MediaSessionService() {
                 repo.logListening(id, 0, 0, finished = true)
                 downloads.onPlayed(id)
                 if (stopHere) return@launch
-                val next = repo.takeNextInQueue() ?: return@launch
+                // setPlayed took the finished episode out of the queue.
+                val next = repo.nextInQueue(id) ?: return@launch
                 withContext(Dispatchers.Main) { playFromQueue(next) }
             }
         }

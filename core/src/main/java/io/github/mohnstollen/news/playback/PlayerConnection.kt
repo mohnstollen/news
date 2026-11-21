@@ -128,10 +128,10 @@ class PlayerConnection(context: Context) {
 
     fun pause() = command { it.pause() }
 
-    /** Skips to the first episode of the queue; the current one keeps its position. */
+    /** Skips to the next episode of the queue; the current one keeps its place and position. */
     fun playNext() {
         main.launch {
-            val next = repo.takeNextInQueue() ?: return@launch
+            val next = repo.nextInQueue(_state.value.articleId) ?: return@launch
             play(next)
         }
     }

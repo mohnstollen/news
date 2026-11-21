@@ -412,17 +412,26 @@ fun EpisodeStatus(
             Spacer(Modifier.width(8.dp))
             Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Spacer(Modifier.width(8.dp))
-        when {
-            download != null -> DownloadProgressIcon(download, Modifier.size(16.dp))
-            downloaded -> Icon(
-                AppIcons.DownloadDone,
-                contentDescription = "Heruntergeladen",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(16.dp),
-            )
-        }
+        Spacer(Modifier.width(4.dp))
+        DownloadButton(articleId, downloaded, download)
     }
+}
+
+/**
+ * Download button for any episode row: loads the episode (and, if set, puts it into the queue),
+ * cancels a running download, or deletes the file.
+ */
+@Composable
+fun DownloadButton(articleId: Long, downloaded: Boolean, download: DownloadProgress?) {
+    val downloads = androidx.compose.ui.platform.LocalContext.current.container.downloads
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    EpisodeDownloadButton(
+        downloaded = downloaded,
+        download = download,
+        onDownload = { scope.launch { downloads.download(listOf(articleId)) } },
+        onCancel = { downloads.cancel(articleId) },
+        onDelete = { scope.launch { downloads.delete(listOf(articleId)) } },
+    )
 }
 
 @Composable

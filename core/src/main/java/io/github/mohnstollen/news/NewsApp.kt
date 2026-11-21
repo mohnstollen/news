@@ -36,7 +36,10 @@ class AppContainer(app: Application, val features: AppFeatures) {
     val recommender = Recommender(http, repository)
 
     init {
-        if (features.podcasts) repository.onNewEpisodes = downloads::enqueueNewEpisodes
+        if (features.podcasts) {
+            repository.onNewEpisodes = downloads::enqueueNewEpisodes
+            repository.onQueued = downloads::onQueued
+        }
         repository.onFeedDeleting = downloads::deleteFiles
     }
 }

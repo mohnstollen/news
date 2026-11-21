@@ -379,12 +379,33 @@ class RepositoryTest {
         d.repo.enqueue(drei)
         assertEquals("queued again: moved to the end", listOf(zwei, eins, drei), d.repo.queueDao.ids())
 
-        assertEquals(zwei, d.repo.takeNextInQueue())
-        assertEquals(listOf(eins, drei), d.repo.queueDao.observe().first().map { it.id })
+        // The playing episode stays in the queue; the next one is the first other one.
+        assertEquals(zwei, d.repo.nextInQueue(null))
+        assertEquals(eins, d.repo.nextInQueue(zwei))
+        assertEquals(listOf(zwei, eins, drei), d.repo.queueDao.observe().first().map { it.id })
+        // Heard: it leaves the queue.
+        d.repo.setPlayed(zwei, true)
+        assertEquals(listOf(eins, drei), d.repo.queueDao.ids())
         d.repo.setArchived(listOf(eins), true)
         assertEquals(listOf(drei), d.repo.queueDao.ids())
+
+        // Undo of taking one out restores the order.
+        d.repo.enqueue(eins)
+        val before = d.repo.queueDao.ids()
         d.repo.dequeue(drei)
-        assertNull(d.repo.takeNextInQueue())
+        d.repo.setQueueOrder(before)
+        assertEquals(before, d.repo.queueDao.ids())
+
+        // Each newly queued episode is handed on once (e.g. to download it); moving it is not new.
+        val handed = mutableListOf<Long>()
+        d.repo.onQueued = { handed += it }
+        d.repo.queueDao.clear()
+        d.repo.enqueue(zwei)
+        d.repo.enqueue(zwei)
+        assertTrue(d.repo.enqueueIfAbsent(drei, next = true))
+        assertFalse(d.repo.enqueueIfAbsent(drei))
+        assertEquals(listOf(zwei, drei), handed)
+        assertEquals(listOf(drei, zwei), d.repo.queueDao.ids())
     }
 
     @Test
