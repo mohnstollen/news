@@ -48,6 +48,14 @@ import kotlinx.coroutines.withContext
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private val main = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /**
+     * Database writes, one after the other in the order they were made: a position saved just
+     * before the end must not land after "played", which resets it. Not cancelled on destroy,
+     * so the last writes still happen.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val writes = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
     private var saveJob: Job? = null
     private var sleepJob: Job? = null
     private var endBufferJob: Job? = null
@@ -220,7 +228,7 @@ class PlaybackService : MediaSessionService() {
         override fun onTracksChanged(tracks: Tracks) {
             val id = currentArticleId() ?: return
             val chapters = id3Chapters(tracks).takeIf { it.isNotEmpty() } ?: return
-            repo.scope.launch { repo.articleDao.setChaptersIfMissing(id, Chapters.encode(chapters)) }
+            writes.launch { repo.articleDao.setChaptersIfMissing(id, Chapters.encode(chapters)) }
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -238,7 +246,7 @@ class PlaybackService : MediaSessionService() {
             val timer = container.sleepTimer
             val stopHere = timer.mode.value == SleepTimer.Mode.EndOfEpisode
             if (stopHere) timer.cancel()
-            repo.scope.launch {
+            writes.launch {
                 repo.setPlayed(id, true)
                 repo.logListening(id, 0, 0, finished = true)
                 downloads.onPlayed(id)
@@ -259,7 +267,7 @@ class PlaybackService : MediaSessionService() {
     /** Podcasting 2.0: the feed links a JSON file with the chapters; loaded once, when played. */
     private fun loadLinkedChapters(articleId: Long) {
         val http = container.http
-        repo.scope.launch {
+        writes.launch {
             val article = repo.articleDao.byId(articleId) ?: return@launch
             val url = article.chaptersUrl ?: return@launch
             if (article.chapters != null) return@launch
@@ -295,7 +303,7 @@ class PlaybackService : MediaSessionService() {
         val player = session?.player ?: return
         val id = currentArticleId() ?: return
         val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: return
-        repo.scope.launch { repo.articleDao.learnDuration(id, duration / 1000) }
+        writes.launch { repo.articleDao.learnDuration(id, duration / 1000) }
     }
 
     private fun endBufferMs(): Long = container.settings.current.endBufferSeconds * 1000L
@@ -327,7 +335,7 @@ class PlaybackService : MediaSessionService() {
         listeningSince = now
         if (listened <= 0) return
         val content = (listened * player.playbackParameters.speed).toLong()
-        repo.scope.launch { repo.logListening(id, listened, content) }
+        writes.launch { repo.logListening(id, listened, content) }
     }
 
     private fun currentArticleId(): Long? = session?.player?.currentMediaItem?.mediaId?.toLongOrNull()
@@ -338,7 +346,7 @@ class PlaybackService : MediaSessionService() {
         val id = currentArticleId() ?: return
         if (player.playbackState == Player.STATE_ENDED) return
         val position = player.currentPosition
-        repo.scope.launch { repo.savePlayPosition(id, position) }
+        writes.launch { repo.savePlayPosition(id, position) }
     }
 
     /** A missing or forbidden file does not come back by asking again; network trouble may pass. */

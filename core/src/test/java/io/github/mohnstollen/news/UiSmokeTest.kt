@@ -15,6 +15,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -649,6 +650,12 @@ class QueueAndStatsUiTest : UiTestBase() {
         compose.waitForIdle()
         compose.onAllNodesWithContentDescription("Nach oben")[1].performClick()
         compose.waitUntil(10_000) { runBlocking { repo.queueDao.ids() } == listOf(one, two) }
+        // The list follows the database a moment later; tap only once it shows the new order.
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("Episode ", substring = true).fetchSemanticsNodes()
+                .mapNotNull { node -> node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text)?.firstOrNull()?.text }
+                .filter { it.startsWith("Episode ") } == listOf("Episode 1", "Episode 2")
+        }
         compose.waitForIdle()
         compose.onAllNodesWithContentDescription("Aus der Warteschlange entfernen")[0].performClick()
         compose.waitUntil(10_000) { runBlocking { repo.queueDao.ids() } == listOf(two) }

@@ -29,6 +29,17 @@ class PlaybackServiceTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
     private val repo get() = context.container.repository
 
+    private val services = mutableListOf<PlaybackService>()
+
+    /** Started services are always stopped afterwards: a media session left open blocks the next test's. */
+    private fun startService(): PlaybackService =
+        Robolectric.buildService(PlaybackService::class.java).create().get().also { services += it }
+
+    @org.junit.After
+    fun stopServices() {
+        services.forEach { it.onDestroy() }
+    }
+
     /** Lets the main looper and the database threads work until [done] holds. */
     private fun waitFor(what: String, done: () -> Boolean) {
         repeat(1500) {
@@ -54,7 +65,7 @@ class PlaybackServiceTest {
             ).single()
         }
 
-        val service = Robolectric.buildService(PlaybackService::class.java).create().get()
+        val service = startService()
         val session = service.sessions.single()
         val player = session.player
         assertEquals("speed from the settings", 1f, player.playbackParameters.speed)
@@ -81,13 +92,15 @@ class PlaybackServiceTest {
 
         player.seekTo(1_000_000)
         controller.release()
+        // Stopping the service stores where playback was.
+        services.remove(service)
         service.onDestroy()
         waitFor("saved position") { runBlocking { repo.articleDao.byId(id)!!.playPosition } == 1_000_000L }
     }
 
     @Test
     fun sleepTimerFadesOutAndPauses() {
-        val service = Robolectric.buildService(PlaybackService::class.java).create().get()
+        val service = startService()
         val player = service.sessions.single().player
         player.play()
         val timer = context.container.sleepTimer
@@ -108,7 +121,6 @@ class PlaybackServiceTest {
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(1f, player.volume)
         assertTrue(player.playWhenReady)
-        service.onDestroy()
     }
 
     /** Silence as a WAV file (half a second by default), which the player can play without a decoder. */
@@ -139,7 +151,7 @@ class PlaybackServiceTest {
             ids[0] to ids[1]
         }
         context.container.settings.update { it.copy(deletePlayedDownloads = false) }
-        val service = Robolectric.buildService(PlaybackService::class.java).create().get()
+        val service = startService()
         val session = service.sessions.single()
         val player = session.player
         val future = MediaController.Builder(context, session.token).buildAsync()
@@ -173,7 +185,6 @@ class PlaybackServiceTest {
         assertNull(context.container.sleepTimer.mode.value)
         runBlocking { assertEquals("still queued", listOf(first), repo.queueDao.ids()) }
         controller.release()
-        service.onDestroy()
     }
 
     @Test
@@ -190,7 +201,7 @@ class PlaybackServiceTest {
             Triple(ids[0], ids[1], long)
         }
         context.container.settings.update { it.copy(endBufferSeconds = 30, deletePlayedDownloads = true) }
-        val service = Robolectric.buildService(PlaybackService::class.java).create().get()
+        val service = startService()
         val session = service.sessions.single()
         val player = session.player
         val future = MediaController.Builder(context, session.token).buildAsync()
@@ -204,15 +215,19 @@ class PlaybackServiceTest {
         // The feed did not say how long it is; the player found out.
         waitFor("length learned") { runBlocking { repo.articleDao.byId(first)!!.durationSeconds } == 100L }
 
-        // 40 seconds left: more than the buffer, nothing happens.
-        controller.seekTo(60_000)
+        // Far from the end: playing a moment changes nothing. (Robolectric plays faster than real
+        // time, so this keeps a wide margin; Episodes.inEndBuffer has the exact limits.)
+        controller.seekTo(10_000)
         controller.play()
-        repeat(10) { shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(100)) }
+        repeat(2) { shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(100)) }
+        controller.pause()
+        shadowOf(Looper.getMainLooper()).idle()
         assertEquals(first.toString(), player.currentMediaItem?.mediaId)
         assertEquals(0L, runBlocking { repo.articleDao.byId(first)!!.playedAt })
 
         // 25 seconds left: inside the 30-second buffer.
         controller.seekTo(75_000)
+        controller.play()
         waitFor("next episode") {
             shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(100))
             player.currentMediaItem?.mediaId == second.toString()
@@ -224,7 +239,6 @@ class PlaybackServiceTest {
         }
         waitFor("download deleted") { !file.exists() && runBlocking { repo.articleDao.byId(first)!!.downloadPath } == null }
         controller.release()
-        service.onDestroy()
     }
 
     @Test
@@ -249,7 +263,7 @@ class PlaybackServiceTest {
                     ),
                 ).single()
             }
-            val service = Robolectric.buildService(PlaybackService::class.java).create().get()
+            val service = startService()
             val session = service.sessions.single()
             val future = MediaController.Builder(context, session.token).buildAsync()
             waitFor("controller") { future.isDone }
@@ -260,7 +274,6 @@ class PlaybackServiceTest {
             assertEquals(listOf(0L, 30_000L), chapters.map { it.startMs })
             assertEquals("Thema", chapters[1].title)
             controller.release()
-            service.onDestroy()
         } finally {
             server.shutdown()
         }
