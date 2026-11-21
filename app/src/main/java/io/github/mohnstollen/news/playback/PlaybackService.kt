@@ -2,6 +2,7 @@ package io.github.mohnstollen.news.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -31,6 +32,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Plays podcast episodes in the background. The media session gives the system notification,
@@ -42,6 +44,11 @@ class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private val main = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var saveJob: Job? = null
+    private var sleepJob: Job? = null
+
+    /** Listening time not yet written to the log: since when, and for which episode. */
+    private var listeningSince = 0L
+    private var listeningId: Long? = null
 
     private val repo get() = container.repository
 
@@ -93,6 +100,36 @@ class PlaybackService : MediaSessionService() {
             )
             .build()
             .also(::addSession)
+
+        main.launch { container.sleepTimer.mode.collect(::onSleepTimer) }
+    }
+
+    private fun onSleepTimer(mode: SleepTimer.Mode?) {
+        sleepJob?.cancel()
+        val player = session?.player ?: return
+        player.volume = 1f
+        if (mode !is SleepTimer.Mode.Until) return
+        sleepJob = main.launch {
+            delay((mode.atElapsed - SystemClock.elapsedRealtime() - SleepTimer.FADE_MS).coerceAtLeast(0))
+            // Fade out instead of stopping mid-sentence at full volume.
+            val steps = 20
+            for (i in 1..steps) {
+                player.volume = 1f - i.toFloat() / steps
+                delay(SleepTimer.FADE_MS / steps)
+            }
+            player.pause()
+            player.volume = 1f
+            container.sleepTimer.cancel()
+        }
+    }
+
+    /** Loads an episode from the queue and plays it from where it was left. */
+    private suspend fun playFromQueue(articleId: Long) {
+        val (item, start) = Episodes.resolve(articleId.toString(), repo.articleDao, repo.feedDao) ?: return
+        val player = session?.player ?: return
+        player.setMediaItem(item, start)
+        player.prepare()
+        player.play()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
@@ -108,6 +145,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         savePosition()
+        logListening()
         session?.run {
             player.release()
             release()
@@ -126,14 +164,17 @@ class PlaybackService : MediaSessionService() {
             startIndex: Int,
             startPositionMs: Long,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
-            // The episode that is being replaced keeps its place.
+            // The episode that is being replaced keeps its place and its listening time.
             savePosition()
+            logListening()
             return main.future {
                 val wanted = mediaItems.getOrNull(startIndex.coerceAtLeast(0))
                     ?: throw IllegalArgumentException("Keine Folge angegeben")
                 val (item, savedPosition) = Episodes.resolve(wanted.mediaId, repo.articleDao, repo.feedDao)
                     ?: throw IllegalArgumentException("Folge ${wanted.mediaId} hat keine Audiodatei")
                 val start = if (startPositionMs == C.TIME_UNSET) savedPosition else startPositionMs
+                // Playing an episode takes it out of the queue.
+                wanted.mediaId.toLongOrNull()?.let { repo.dequeue(it) }
                 MediaSession.MediaItemsWithStartPosition(listOf(item), 0, start)
             }
         }
@@ -152,24 +193,42 @@ class PlaybackService : MediaSessionService() {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             saveJob?.cancel()
             if (isPlaying) {
+                listeningSince = SystemClock.elapsedRealtime()
+                listeningId = currentArticleId()
                 saveJob = main.launch {
                     while (isActive) {
                         delay(SAVE_INTERVAL_MS)
                         savePosition()
+                        logListening()
                     }
                 }
             } else {
                 savePosition()
+                logListening()
+                listeningId = null
             }
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            // Time so far belongs to the previous episode.
+            logListening()
+            listeningId = if (session?.player?.isPlaying == true) currentArticleId() else null
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState != Player.STATE_ENDED) return
             val id = currentArticleId() ?: return
             val downloads = container.downloads
+            val timer = container.sleepTimer
+            val stopHere = timer.mode.value == SleepTimer.Mode.EndOfEpisode
+            if (stopHere) timer.cancel()
             repo.scope.launch {
                 repo.setPlayed(id, true)
+                repo.logListening(id, 0, 0, finished = true)
                 downloads.onPlayed(id)
+                if (stopHere) return@launch
+                val next = repo.takeNextInQueue() ?: return@launch
+                withContext(Dispatchers.Main) { playFromQueue(next) }
             }
         }
 
@@ -179,6 +238,18 @@ class PlaybackService : MediaSessionService() {
                 container.settings.update { it.copy(playbackSpeed = speed) }
             }
         }
+    }
+
+    /** Writes the listening time since the last call to the statistics. */
+    private fun logListening() {
+        val id = listeningId ?: return
+        val player = session?.player ?: return
+        val now = SystemClock.elapsedRealtime()
+        val listened = now - listeningSince
+        listeningSince = now
+        if (listened <= 0) return
+        val content = (listened * player.playbackParameters.speed).toLong()
+        repo.scope.launch { repo.logListening(id, listened, content) }
     }
 
     private fun currentArticleId(): Long? = session?.player?.currentMediaItem?.mediaId?.toLongOrNull()

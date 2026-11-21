@@ -55,7 +55,9 @@ import io.github.mohnstollen.news.playback.DownloadProgress
 import io.github.mohnstollen.news.playback.Episodes
 import io.github.mohnstollen.news.playback.PlayerConnection
 import io.github.mohnstollen.news.playback.PlayerState
+import io.github.mohnstollen.news.playback.SleepTimer
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 /** The activity's connection to the player; null in previews. */
@@ -115,8 +117,14 @@ fun MiniPlayer(onOpenArticle: ((Long) -> Unit)?) {
                         .padding(vertical = 4.dp),
                 ) {
                     Text(state.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val timer by player.sleepTimer.mode.collectAsStateWithLifecycle()
+                    val timerText = when (timer) {
+                        is SleepTimer.Mode.Until -> "Timer " + Episodes.clock(player.sleepTimer.remainingMs() ?: 0)
+                        SleepTimer.Mode.EndOfEpisode -> "Timer: Folgenende"
+                        null -> ""
+                    }
                     Text(
-                        text = state.error ?: listOf(state.subtitle, progressText(state)).filter { it.isNotBlank() }
+                        text = state.error ?: listOf(state.subtitle, progressText(state), timerText).filter { it.isNotBlank() }
                             .joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall,
                         color = if (state.error != null) MaterialTheme.colorScheme.error
@@ -240,6 +248,26 @@ private fun PlayerSheet(
             }
 
             Spacer(Modifier.height(8.dp))
+            SleepTimerChips(player)
+
+            val queue by player.queue.collectAsStateWithLifecycle(emptyList())
+            queue.firstOrNull()?.let { next ->
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Als Nächstes", style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            next.title + if (queue.size > 1) " (+${queue.size - 1})" else "",
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    TextButton(onClick = player::playNext) { Text("Jetzt abspielen") }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth()) {
                 if (onOpenArticle != null) TextButton(onClick = onOpenArticle) { Text("Zur Folge") }
                 Spacer(Modifier.weight(1f))
@@ -250,6 +278,37 @@ private fun PlayerSheet(
                 }
             }
         }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SleepTimerChips(player: PlayerConnection) {
+    val timer = player.sleepTimer
+    val mode by timer.mode.collectAsStateWithLifecycle()
+    val current = mode
+    Text(
+        when (current) {
+            is SleepTimer.Mode.Until -> "Sleep-Timer: noch " + Episodes.clock(timer.remainingMs() ?: 0)
+            SleepTimer.Mode.EndOfEpisode -> "Sleep-Timer: am Ende der Folge"
+            null -> "Sleep-Timer"
+        },
+        style = MaterialTheme.typography.labelLarge,
+    )
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SleepTimer.CHOICES.forEach { minutes ->
+            FilterChip(
+                selected = (current as? SleepTimer.Mode.Until)?.minutes == minutes,
+                onClick = { timer.start(minutes) },
+                label = { Text("$minutes Min") },
+            )
+        }
+        FilterChip(
+            selected = current == SleepTimer.Mode.EndOfEpisode,
+            onClick = timer::endOfEpisode,
+            label = { Text("Folgenende") },
+        )
+        if (current != null) FilterChip(selected = false, onClick = timer::cancel, label = { Text("Aus") })
     }
 }
 
@@ -326,6 +385,24 @@ fun EpisodeDownloadButton(
         else -> IconButton(onClick = onDownload) {
             Icon(AppIcons.Download, contentDescription = "Herunterladen", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+}
+
+/** Adds the episode to the queue, or takes it out. */
+@Composable
+fun QueueButton(articleId: Long) {
+    val repo = androidx.compose.ui.platform.LocalContext.current.container.repository
+    val ids by remember { repo.queueDao.observeIds() }.collectAsStateWithLifecycle(emptyList())
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val queued = articleId in ids
+    // The episode that is playing is not queued; adding it would play it twice.
+    if (playerState().articleId == articleId && !queued) return
+    IconButton(onClick = { scope.launch { if (queued) repo.dequeue(articleId) else repo.enqueue(articleId) } }) {
+        Icon(
+            if (queued) AppIcons.QueueRemove else AppIcons.QueueAdd,
+            contentDescription = if (queued) "Aus der Warteschlange nehmen" else "Zur Warteschlange hinzufügen",
+            tint = if (queued) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

@@ -313,6 +313,7 @@ private fun EpisodePanel(a: Article, download: DownloadProgress?, vm: ReaderView
             }
         }
         SpeedButton()
+        QueueButton(a.id)
         EpisodeDownloadButton(
             downloaded = a.downloadPath != null,
             download = download,

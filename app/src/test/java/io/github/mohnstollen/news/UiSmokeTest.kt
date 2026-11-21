@@ -2,7 +2,10 @@ package io.github.mohnstollen.news
 
 import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -16,6 +19,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
@@ -93,6 +97,13 @@ abstract class UiTestBase {
 
     protected fun article(n: Int) = runBlocking {
         repo.articleDao.observeList(null, false).first().first { it.title == "Artikel Nummer $n" }
+    }
+
+    /** Scrolls the open drawer to an entry and taps it; the drawer is longer than the test screen. */
+    protected fun openFromDrawer(text: String) {
+        compose.onNode(hasScrollToNodeAction() and hasAnyDescendant(hasText("Gemerkt")))
+            .performScrollToNode(hasText(text))
+        compose.onNodeWithText(text).performClick()
     }
 
     protected fun waitFor(text: String) = compose.waitUntil(5_000) {
@@ -195,7 +206,7 @@ class QuickFilterUiTest : UiTestBase() {
 
         // The folder is offered when adding a feed.
         compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
-        compose.onNodeWithText("Feeds verwalten").performClick()
+        openFromDrawer("Feeds verwalten")
         waitFor("https://example.org/technik")
         compose.onNodeWithText("Feed hinzufügen", useUnmergedTree = true).performClick()
         waitFor("Auswählen oder neuen Namen eingeben")
@@ -248,7 +259,7 @@ class HideReadUiTest : UiTestBase() {
 
         // The setting is on the settings screen.
         compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
-        compose.onNodeWithText("Einstellungen").performClick()
+        openFromDrawer("Einstellungen")
         waitFor("Gelesene Artikel ausblenden")
     }
 }
@@ -277,7 +288,7 @@ class QrLoginUiTest : UiTestBase() {
         try {
             waitFor("Artikel Nummer 1")
             compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
-            compose.onNodeWithText("Einstellungen").performClick()
+            openFromDrawer("Einstellungen")
             waitFor("Mit QR-Code anmelden")
 
             val address = java.net.URLEncoder.encode(server.url("/").toString().trimEnd('/'), "UTF-8")
@@ -332,7 +343,7 @@ class LoginFlowUiTest : UiTestBase() {
         try {
             waitFor("Artikel Nummer 1")
             compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
-            compose.onNodeWithText("Einstellungen").performClick()
+            openFromDrawer("Einstellungen")
             waitFor("Mit Nextcloud anmelden")
             compose.onNodeWithText("Server-Adresse").performScrollTo().performTextInput(server.url("/").toString())
             compose.onNodeWithText("Mit Nextcloud anmelden").performScrollTo().performClick()
@@ -429,8 +440,8 @@ class UiSmokeTest : UiTestBase() {
         compose.onNodeWithText("Artikel Nummer 1").assertIsDisplayed()
 
         compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
-        waitFor("Feeds verwalten")
-        compose.onNodeWithText("Feeds verwalten").performClick()
+        waitFor("Gemerkt")
+        openFromDrawer("Feeds verwalten")
         waitFor("https://example.org/feed")
         compose.onNodeWithText("Feed hinzufügen", useUnmergedTree = true).performClick()
         waitFor("Adresse des Feeds oder der Website")
@@ -442,8 +453,8 @@ class UiSmokeTest : UiTestBase() {
 
         waitFor("Gemerkt")
         compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
-        waitFor("Einstellungen")
-        compose.onNodeWithText("Einstellungen").performClick()
+        waitFor("Gemerkt")
+        openFromDrawer("Einstellungen")
         waitFor("Intervall in Minuten")
         compose.onNodeWithText("Nextcloud-Synchronisation").assertExists()
         assertEquals(60, context.container.settings.current.intervalMinutes)
@@ -587,5 +598,59 @@ class ArchiveUiTest : UiTestBase() {
         compose.waitUntil(5_000) { archivedAt(3) > 0 }
         waitFor("Artikel Nummer 4")
         assertTrue(compose.onAllNodesWithText("Artikel Nummer 3").fetchSemanticsNodes().isEmpty())
+    }
+}
+
+class QueueAndStatsUiTest : UiTestBase() {
+    @Test(timeout = 120000)
+    fun episodesGoIntoTheQueueAndTheStatisticsShowTheFavourite() {
+        val (one, two) = runBlocking {
+            val feedId = repo.feedDao.all().first().id
+            val now = System.currentTimeMillis()
+            fun episode(n: Int) = Article(
+                feedId = feedId, guid = "ep$n", title = "Episode $n", pubDate = now + n, fetchedAt = 0,
+                enclosureUrl = "https://example.org/ep$n.mp3", durationSeconds = 600,
+            )
+            val ids = repo.articleDao.insertAll(listOf(episode(1), episode(2)))
+            // Listening history: two podcasts, one clearly ahead.
+            val today = java.time.LocalDate.now().toEpochDay()
+            repo.listenDao.insert(io.github.mohnstollen.news.data.ListenEntry(today, ids[0], "https://a", "Lieblingspodcast", 3 * 3_600_000L, 4 * 3_600_000L, 2))
+            repo.listenDao.insert(io.github.mohnstollen.news.data.ListenEntry(today - 1, ids[1], "https://b", "Anderer Podcast", 1_800_000L, 1_800_000L, 0))
+            ids[0] to ids[1]
+        }
+        waitFor("Episode 2")
+
+        // Swipe right: into the queue. Plain articles cannot be queued.
+        compose.onNodeWithText("Episode 2").performTouchInput { swipeRight() }
+        compose.waitUntil(5_000) { runBlocking { repo.queueDao.ids() } == listOf(two) }
+        waitFor("in der Warteschlange")
+        compose.onNodeWithText("Episode 1").performTouchInput { swipeRight() }
+        compose.waitUntil(5_000) { runBlocking { repo.queueDao.ids() } == listOf(two, one) }
+
+        // The queue screen: reorder and remove.
+        compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
+        compose.onNodeWithText("Warteschlange").performClick()
+        waitFor("Leeren")
+        compose.onAllNodesWithContentDescription("Nach oben")[1].performClick()
+        compose.waitUntil(5_000) { runBlocking { repo.queueDao.ids() } == listOf(one, two) }
+        compose.onAllNodesWithContentDescription("Aus der Warteschlange entfernen")[0].performClick()
+        compose.waitUntil(5_000) { runBlocking { repo.queueDao.ids() } == listOf(two) }
+
+        // In the reader, the queue button shows that it is queued and takes it out.
+        compose.onNodeWithText("Episode 2").performClick()
+        compose.onNodeWithContentDescription("Aus der Warteschlange nehmen").performClick()
+        compose.waitUntil(5_000) { runBlocking { repo.queueDao.ids() }.isEmpty() }
+        compose.onNodeWithContentDescription("Zur Warteschlange hinzufügen").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Zurück").performClick()
+        compose.onNodeWithContentDescription("Zurück").performClick()
+
+        // Statistics.
+        compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
+        openFromDrawer("Statistik")
+        waitFor("Dein Lieblingspodcast dieses Jahr")
+        assertEquals("card and top list", 2, compose.onAllNodesWithText("Lieblingspodcast").fetchSemanticsNodes().size)
+        waitFor("3 Std 30 Min")
+        compose.onNodeWithText("Meistgehört dieses Jahr").performScrollTo()
+        compose.onNodeWithText("Durch höhere Geschwindigkeit gespart").performScrollTo().assertIsDisplayed()
     }
 }

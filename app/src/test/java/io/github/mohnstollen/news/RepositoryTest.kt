@@ -360,6 +360,89 @@ class RepositoryTest {
     }
 
     @Test
+    fun queueKeepsItsOrderAndArchivingTakesEpisodesOut() = runBlocking {
+        val d = device()
+        serve("/feed.xml", rss(Triple("1", "Eins", recent), Triple("2", "Zwei", recent), Triple("3", "Drei", recent)))
+        d.repo.addFeed(url("/feed.xml"), null)
+        val ids = d.repo.articleDao.observeList(null, false).first().associate { it.title to it.id }
+        val (eins, zwei, drei) = listOf(ids.getValue("Eins"), ids.getValue("Zwei"), ids.getValue("Drei"))
+
+        d.repo.enqueue(eins)
+        d.repo.enqueue(zwei)
+        d.repo.enqueue(drei, next = true)
+        assertEquals(listOf(drei, eins, zwei), d.repo.queueDao.ids())
+
+        d.repo.moveInQueue(zwei, up = true)
+        assertEquals(listOf(drei, zwei, eins), d.repo.queueDao.ids())
+        d.repo.moveInQueue(drei, up = true)
+        assertEquals("the first cannot move up", listOf(drei, zwei, eins), d.repo.queueDao.ids())
+        d.repo.enqueue(drei)
+        assertEquals("queued again: moved to the end", listOf(zwei, eins, drei), d.repo.queueDao.ids())
+
+        assertEquals(zwei, d.repo.takeNextInQueue())
+        assertEquals(listOf(eins, drei), d.repo.queueDao.observe().first().map { it.id })
+        d.repo.setArchived(listOf(eins), true)
+        assertEquals(listOf(drei), d.repo.queueDao.ids())
+        d.repo.dequeue(drei)
+        assertNull(d.repo.takeNextInQueue())
+    }
+
+    @Test
+    fun listeningTimeAddsUpPerDayAndOutlivesTheFeed() = runBlocking {
+        val d = device()
+        serve("/a.xml", rss(Triple("1", "A1", recent), Triple("2", "A2", recent), title = "Podcast A"))
+        serve("/b.xml", rss(Triple("1", "B1", recent), title = "Podcast B"))
+        val a = d.repo.addFeed(url("/a.xml"), null)
+        d.repo.addFeed(url("/b.xml"), null)
+        val ids = d.repo.articleDao.observeList(null, false).first().associate { it.title to it.id }
+
+        d.repo.logListening(ids.getValue("A1"), 30 * 60_000L, 45 * 60_000L)
+        d.repo.logListening(ids.getValue("A1"), 10 * 60_000L, 15 * 60_000L)
+        d.repo.logListening(ids.getValue("A1"), 0, 0, finished = true)
+        d.repo.logListening(ids.getValue("A2"), 20 * 60_000L, 20 * 60_000L)
+        d.repo.logListening(ids.getValue("B1"), 50 * 60_000L, 50 * 60_000L)
+
+        val today = java.time.LocalDate.now().toEpochDay()
+        val totals = d.repo.listenDao.observeTotals(today).first()
+        assertEquals(110 * 60_000L, totals.listenedMs)
+        assertEquals(130 * 60_000L, totals.contentMs)
+        assertEquals(1, totals.finished)
+        assertEquals(3, totals.episodes)
+
+        val top = d.repo.listenDao.observeTopFeeds(0, 5).first()
+        assertEquals(listOf("Podcast A", "Podcast B"), top.map { it.feedTitle })
+        assertEquals(60 * 60_000L, top.first().listenedMs)
+        assertEquals(2, top.first().episodes)
+        assertEquals(listOf(today), d.repo.listenDao.observeDays(today - 6).first().map { it.day })
+        assertEquals(0L, d.repo.listenDao.observeTotals(today + 1).first().listenedMs)
+
+        // Unsubscribing keeps the history.
+        d.repo.deleteFeed(a.id)
+        assertEquals("Podcast A", d.repo.listenDao.observeTopFeeds(0, 5).first().first().feedTitle)
+    }
+
+    @Test
+    fun subscribingWithAutoDownloadFetchesTheNewestEpisode() = runBlocking {
+        val d = device()
+        val handed = mutableListOf<Long>()
+        d.repo.onNewEpisodes = { handed += it }
+        val format = DateTimeFormatter.RFC_1123_DATE_TIME.withLocale(Locale.ENGLISH)
+        fun item(guid: String, age: Long, audio: Boolean) =
+            "<item><guid>$guid</guid><title>Folge $guid</title>" +
+                "<pubDate>${format.format(Instant.now().minusSeconds(age).atOffset(ZoneOffset.UTC))}</pubDate>" +
+                (if (audio) "<enclosure url=\"${url("/$guid.mp3")}\" type=\"audio/mpeg\"/>" else "") + "</item>"
+        serve(
+            "/podcast.xml",
+            "<rss version=\"2.0\"><channel><title>Podcast</title>" +
+                item("text", 10, audio = false) + item("neu", 100, audio = true) + item("alt", 9000, audio = true) +
+                "</channel></rss>",
+        )
+        val feed = d.repo.addFeed(url("/podcast.xml"), null, autoDownload = true)
+        assertTrue(d.repo.feedDao.byId(feed.id)!!.autoDownload)
+        assertEquals(listOf(d.repo.articleDao.byGuid(feed.id, "neu")!!.id), handed)
+    }
+
+    @Test
     fun fullTextIsExtractedFromTheLinkedPage() = runBlocking {
         val d = device()
         val paragraphs = (1..8).joinToString("") {

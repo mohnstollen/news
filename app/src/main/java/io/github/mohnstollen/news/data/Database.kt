@@ -105,6 +105,129 @@ data class ArticleFts(
     val note: String?,
 )
 
+/** Episodes waiting to be played, in the order of [position]. The current episode is not in it. */
+@Entity(
+    tableName = "queue",
+    foreignKeys = [
+        ForeignKey(entity = Article::class, parentColumns = ["id"], childColumns = ["articleId"], onDelete = ForeignKey.CASCADE),
+    ],
+)
+data class QueueEntry(
+    @PrimaryKey val articleId: Long,
+    val position: Long,
+)
+
+data class QueueItem(
+    val id: Long,
+    val title: String,
+    val feedTitle: String,
+    val durationSeconds: Long?,
+    val playPosition: Long,
+    val downloaded: Boolean,
+)
+
+/**
+ * Listening time per day and episode, for the statistics. Keeps the feed's address and title, so
+ * the numbers survive when the episode or the feed is deleted.
+ */
+@Entity(tableName = "listen_log", primaryKeys = ["day", "articleId"])
+data class ListenEntry(
+    /** Local date as days since 1970-01-01. */
+    val day: Long,
+    val articleId: Long,
+    val feedUrl: String,
+    val feedTitle: String,
+    /** Time actually spent listening. */
+    val listenedMs: Long,
+    /** Playing time of the episode that was covered; more than [listenedMs] at higher speeds. */
+    val contentMs: Long,
+    /** How often the episode was played to the end on that day. */
+    val finished: Int = 0,
+)
+
+data class ListenTotals(
+    val listenedMs: Long,
+    val contentMs: Long,
+    val finished: Int,
+    val episodes: Int,
+)
+
+data class FeedListening(
+    val feedUrl: String,
+    val feedTitle: String,
+    val listenedMs: Long,
+    val episodes: Int,
+)
+
+data class DayListening(val day: Long, val listenedMs: Long)
+
+@Dao
+interface QueueDao {
+    @Query(
+        "SELECT a.id, a.title, f.title AS feedTitle, a.durationSeconds, a.playPosition, " +
+            "(a.downloadPath IS NOT NULL) AS downloaded " +
+            "FROM queue q JOIN articles a ON a.id = q.articleId JOIN feeds f ON f.id = a.feedId ORDER BY q.position",
+    )
+    fun observe(): Flow<List<QueueItem>>
+
+    @Query("SELECT articleId FROM queue ORDER BY position")
+    fun observeIds(): Flow<List<Long>>
+
+    @Query("SELECT articleId FROM queue ORDER BY position")
+    suspend fun ids(): List<Long>
+
+    @Query("SELECT MIN(position) FROM queue")
+    suspend fun minPosition(): Long?
+
+    @Query("SELECT MAX(position) FROM queue")
+    suspend fun maxPosition(): Long?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun put(entry: QueueEntry)
+
+    @Query("DELETE FROM queue WHERE articleId = :articleId")
+    suspend fun remove(articleId: Long)
+
+    @Query("DELETE FROM queue")
+    suspend fun clear()
+
+    @Query("UPDATE queue SET position = :position WHERE articleId = :articleId")
+    suspend fun setPosition(articleId: Long, position: Long)
+}
+
+@Dao
+interface ListenDao {
+    @Query(
+        "UPDATE listen_log SET listenedMs = listenedMs + :listenedMs, contentMs = contentMs + :contentMs, " +
+            "finished = finished + :finished, feedTitle = :feedTitle WHERE day = :day AND articleId = :articleId",
+    )
+    suspend fun add(day: Long, articleId: Long, feedTitle: String, listenedMs: Long, contentMs: Long, finished: Int): Int
+
+    @Insert
+    suspend fun insert(entry: ListenEntry)
+
+    @Query(
+        "SELECT COALESCE(SUM(listenedMs), 0) AS listenedMs, COALESCE(SUM(contentMs), 0) AS contentMs, " +
+            "COALESCE(SUM(finished), 0) AS finished, COUNT(DISTINCT articleId) AS episodes " +
+            "FROM listen_log WHERE day >= :fromDay",
+    )
+    fun observeTotals(fromDay: Long): Flow<ListenTotals>
+
+    /** Feeds by listening time; the title is the one last seen. */
+    @Query(
+        "SELECT feedUrl, (SELECT l2.feedTitle FROM listen_log l2 WHERE l2.feedUrl = l.feedUrl ORDER BY l2.day DESC LIMIT 1) " +
+            "AS feedTitle, SUM(listenedMs) AS listenedMs, COUNT(DISTINCT articleId) AS episodes " +
+            "FROM listen_log l WHERE day >= :fromDay GROUP BY feedUrl ORDER BY listenedMs DESC LIMIT :limit",
+    )
+    fun observeTopFeeds(fromDay: Long, limit: Int): Flow<List<FeedListening>>
+
+    @Query("SELECT day, SUM(listenedMs) AS listenedMs FROM listen_log WHERE day >= :fromDay GROUP BY day ORDER BY day")
+    fun observeDays(fromDay: Long): Flow<List<DayListening>>
+
+    @Query("SELECT DISTINCT feedUrl FROM listen_log")
+    suspend fun feedUrls(): List<String>
+}
+
 /** Remembers unsubscribed feeds so a sync does not bring them back. */
 @Entity(tableName = "deleted_feeds")
 data class DeletedFeed(
@@ -294,6 +417,12 @@ interface ArticleDao {
     @Query("UPDATE articles SET read = 1, readAt = :now WHERE id IN (:ids) AND read = 0")
     suspend fun markReadIfUnread(ids: List<Long>, now: Long)
 
+    @Query("SELECT EXISTS(SELECT 1 FROM articles WHERE feedId = :feedId AND enclosureUrl IS NOT NULL)")
+    suspend fun hasEpisodes(feedId: Long): Boolean
+
+    @Query("SELECT title FROM articles WHERE feedId = :feedId ORDER BY pubDate DESC LIMIT :limit")
+    suspend fun recentTitles(feedId: Long, limit: Int): List<String>
+
     @Query("SELECT id, downloadPath FROM articles WHERE downloadPath IS NOT NULL")
     suspend fun downloads(): List<DownloadRow>
 
@@ -393,13 +522,17 @@ interface ArticleDao {
 }
 
 @Database(
-    entities = [Feed::class, Article::class, DeletedFeed::class, ArticleFts::class],
-    version = 5,
+    entities = [
+        Feed::class, Article::class, DeletedFeed::class, ArticleFts::class, QueueEntry::class, ListenEntry::class,
+    ],
+    version = 6,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun feedDao(): FeedDao
     abstract fun articleDao(): ArticleDao
+    abstract fun queueDao(): QueueDao
+    abstract fun listenDao(): ListenDao
 
     companion object {
         /** Adds the per-feed notification switch and the search index. */
@@ -445,7 +578,23 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+        /** Queue of episodes and the listening log for the statistics. */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `queue` (`articleId` INTEGER NOT NULL, `position` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`articleId`), FOREIGN KEY(`articleId`) REFERENCES `articles`(`id`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE )",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `listen_log` (`day` INTEGER NOT NULL, `articleId` INTEGER NOT NULL, " +
+                        "`feedUrl` TEXT NOT NULL, `feedTitle` TEXT NOT NULL, `listenedMs` INTEGER NOT NULL, " +
+                        "`contentMs` INTEGER NOT NULL, `finished` INTEGER NOT NULL, PRIMARY KEY(`day`, `articleId`))",
+                )
+            }
+        }
+
+        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
     }
 }
 

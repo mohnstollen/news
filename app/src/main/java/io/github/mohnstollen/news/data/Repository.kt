@@ -35,6 +35,8 @@ class Repository(
 ) {
     val feedDao = db.feedDao()
     val articleDao = db.articleDao()
+    val queueDao = db.queueDao()
+    val listenDao = db.listenDao()
 
     /** Outlives screens, so a refresh keeps running when the user navigates away. */
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -181,7 +183,11 @@ class Repository(
     }
 
     /** Verifies the address, subscribes and stores the entries that came with the check. */
-    suspend fun addFeed(input: String, category: String?): Feed = withContext(Dispatchers.IO) {
+    /**
+     * Subscribes. With [autoDownload], new episodes are downloaded after each update, and the
+     * newest one right away, so there is something to play offline.
+     */
+    suspend fun addFeed(input: String, category: String?, autoDownload: Boolean = false): Feed = withContext(Dispatchers.IO) {
         if (input.isBlank()) throw FeedException("Bitte eine Adresse eingeben")
         feedDao.byUrl(normalizeUrl(input))?.let { throw FeedException("„${it.title}“ ist bereits abonniert") }
         val found = fetcher.discover(input)
@@ -193,12 +199,17 @@ class Repository(
             siteUrl = found.feed.siteUrl,
             category = category?.trim()?.ifBlank { null },
             updatedAt = now,
+            autoDownload = autoDownload,
         )
         val id = feedDao.insert(feed)
         feedDao.removeTombstone(found.url)
         val stored = feed.copy(id = id)
         storeItems(stored, found.feed, now)
-        feedDao.fetchSucceeded(id, now, null, null, found.feed.siteUrl)
+        feedDao.fetchSucceeded(id, now, null, null, found.feed.siteUrl, found.feed.imageUrl)
+        if (autoDownload) {
+            val newest = found.feed.items.filter { it.enclosure != null }.maxByOrNull { it.pubDate ?: 0 }
+            newest?.let { articleDao.byGuid(id, it.guid) }?.let { onNewEpisodes?.invoke(listOf(it.id)) }
+        }
         stored
     }
 
@@ -299,8 +310,52 @@ class Repository(
         db.withTransaction {
             ids.chunked(MAX_SQL_VARIABLES).forEach {
                 articleDao.setArchived(it, if (archived) now else 0)
-                if (archived) articleDao.markReadIfUnread(it, now)
+                if (archived) {
+                    articleDao.markReadIfUnread(it, now)
+                    it.forEach { id -> queueDao.remove(id) }
+                }
             }
+        }
+    }
+
+    // ---- Queue ------------------------------------------------------------------------------
+
+    /** Puts an episode into the queue: next in line, or at the end. Moves it if already queued. */
+    suspend fun enqueue(articleId: Long, next: Boolean = false) = db.withTransaction {
+        val position = if (next) (queueDao.minPosition() ?: 1) - 1 else (queueDao.maxPosition() ?: -1) + 1
+        queueDao.put(QueueEntry(articleId, position))
+    }
+
+    suspend fun dequeue(articleId: Long) = queueDao.remove(articleId)
+
+    /** Swaps the episode with its neighbour above ([up]) or below. */
+    suspend fun moveInQueue(articleId: Long, up: Boolean) = db.withTransaction {
+        val ids = queueDao.ids().toMutableList()
+        val index = ids.indexOf(articleId)
+        val target = if (up) index - 1 else index + 1
+        if (index < 0 || target !in ids.indices) return@withTransaction
+        java.util.Collections.swap(ids, index, target)
+        // Renumbered, so the positions are simply 0, 1, 2, ...
+        ids.forEachIndexed { i, id -> queueDao.setPosition(id, i.toLong()) }
+    }
+
+    /** Takes the next episode out of the queue; null if it is empty. */
+    suspend fun takeNextInQueue(): Long? = db.withTransaction {
+        queueDao.ids().firstOrNull()?.also { queueDao.remove(it) }
+    }
+
+    // ---- Statistics -------------------------------------------------------------------------
+
+    /** Adds listening time to today's entry for the episode. */
+    suspend fun logListening(articleId: Long, listenedMs: Long, contentMs: Long, finished: Boolean = false) {
+        if (listenedMs <= 0 && !finished) return
+        val article = articleDao.byId(articleId) ?: return
+        val feed = feedDao.byId(article.feedId) ?: return
+        val day = java.time.LocalDate.now().toEpochDay()
+        val done = if (finished) 1 else 0
+        db.withTransaction {
+            val updated = listenDao.add(day, articleId, feed.title, listenedMs, contentMs, done)
+            if (updated == 0) listenDao.insert(ListenEntry(day, articleId, feed.url, feed.title, listenedMs, contentMs, done))
         }
     }
 

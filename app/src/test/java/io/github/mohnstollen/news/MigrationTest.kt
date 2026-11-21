@@ -79,6 +79,8 @@ class MigrationTest {
             assertEquals("not archived", 0L, article.archivedAt)
             assertTrue("listed", db.articleDao().observeList(null, false).first().any { it.id == 7L })
             assertEquals(false, feed.autoDownload)
+            assertTrue("empty queue", db.queueDao().ids().isEmpty())
+            assertEquals(0L, db.listenDao().observeTotals(0).first().listenedMs)
 
             // Existing articles are searchable, and so are later changes.
             suspend fun search(text: String) =

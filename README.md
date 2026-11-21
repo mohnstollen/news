@@ -29,9 +29,18 @@ RSS-/Atom-Reader für Android (ab Android 8.0), geschrieben in Kotlin mit Jetpac
   (0,8× bis 2×), 10 s zurück / 30 s vor, Steuerung über Benachrichtigung, Sperrbildschirm, Kopfhörer
   und Bluetooth. Jede Folge merkt sich, wo sie aufgehört hat; zu Ende gehörte Folgen gelten als gelesen
 - **Downloads**: Folgen pro Stück herunterladen (Knopf im Artikel) oder pro Feed automatisch nach jedem
-  Update (Feeds verwalten → Feed antippen). Standardmäßig nur im WLAN; unterbrochene Downloads laufen
+  Update, einstellbar schon beim Abonnieren oder später unter Feeds verwalten → Feed antippen. Standardmäßig nur im WLAN; unterbrochene Downloads laufen
   weiter, wo sie aufgehört haben. Gehörte Folgen werden auf Wunsch gelöscht; Belegung und „Alle löschen“
   unter Einstellungen → Podcasts
+- **Warteschlange**: Folgen im Artikel einreihen oder in der Liste nach rechts wischen; sie laufen
+  nacheinander, wenn eine Folge zu Ende ist. Reihenfolge ändern und entfernen unter „Warteschlange“ im Menü
+- **Sleep-Timer** im Player: 5 bis 90 Minuten oder bis zum Ende der Folge, mit sanftem Ausblenden
+- **Statistik**: Hörzeit dieser Woche, dieses Monats, dieses Jahres und insgesamt, Lieblingspodcast,
+  meistgehörte Podcasts, die letzten 7 Tage, zu Ende gehörte Folgen und durch Geschwindigkeit gesparte Zeit.
+  Bleibt erhalten, wenn ein Podcast abbestellt wird
+- **Podcasts entdecken**: Suche im öffentlichen Podcast-Katalog von Apple und Vorschläge passend zu den
+  abonnierten Podcasts („Weil du … hörst“): gleiche Kategorie, Themen aus den Folgentiteln. Fragt den
+  Katalog nur auf Knopfdruck; dabei gehen Podcast-Namen und Stichwörter an Apple, ohne Konto
 - **Archiv**: Artikel oder Folgen in der Liste nach links wischen (oder im Artikel oben archivieren), damit
   sie aus allen Listen verschwinden. Mit „Rückgängig“, über das Archiv im Menü und über die Suche
   zurückzuholen

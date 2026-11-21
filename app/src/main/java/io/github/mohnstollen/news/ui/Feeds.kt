@@ -186,7 +186,7 @@ fun FeedsScreen(onBack: () -> Unit) {
     if (addOpen) {
         AddFeedDialog(
             folders = folders,
-            onAdd = { url, category -> repo.addFeed(url, category) },
+            onAdd = { url, category, autoDownload -> repo.addFeed(url, category, autoDownload) },
             onAdded = { feed ->
                 addOpen = false
                 scope.launch { snackbar.showSnackbar("„${feed.title}“ hinzugefügt") }
@@ -308,12 +308,13 @@ private fun FolderField(value: String, onChange: (String) -> Unit, folders: List
 @Composable
 private fun AddFeedDialog(
     folders: List<String>,
-    onAdd: suspend (url: String, category: String?) -> Feed,
+    onAdd: suspend (url: String, category: String?, autoDownload: Boolean) -> Feed,
     onAdded: (Feed) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var url by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf("") }
+    var autoDownload by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -336,6 +337,17 @@ private fun AddFeedDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 FolderField(value = category, onChange = { category = it }, folders = folders, enabled = !busy)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Folgen automatisch herunterladen")
+                        Text(
+                            "Für Podcasts: lädt die neueste Folge gleich und neue Folgen nach jedem Update.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = autoDownload, onCheckedChange = { autoDownload = it }, enabled = !busy)
+                }
                 if (busy) {
                     Text("Feed wird geprüft …", style = MaterialTheme.typography.bodySmall)
                     LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -349,7 +361,7 @@ private fun AddFeedDialog(
                     busy = true
                     scope.launch {
                         try {
-                            onAdded(onAdd(url, category))
+                            onAdded(onAdd(url, category, autoDownload))
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {

@@ -157,6 +157,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
     val downloads = container.downloads.progress
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+    val queueSize = repo.queueDao.observeIds().map { it.size }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    fun enqueue(item: ArticleListItem) {
+        viewModelScope.launch {
+            repo.enqueue(item.id)
+            messages.tryEmit("„${item.title}“ in der Warteschlange")
+        }
+    }
 
     /** Archiving from the list, for the "undo" of the snackbar: (message, ids, archived). */
     val archived = MutableSharedFlow<Triple<String, List<Long>, Boolean>>(extraBufferCapacity = 4)
@@ -339,6 +348,7 @@ fun ArticleListScreen(
     onOpenArticle: (Long) -> Unit,
     onOpenFeeds: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenScreen: (String) -> Unit = {},
 ) {
     val scope by vm.scope.collectAsStateWithLifecycle()
     val feeds by vm.feeds.collectAsStateWithLifecycle()
@@ -375,6 +385,7 @@ fun ArticleListScreen(
         }
     }
     val downloads by vm.downloads.collectAsStateWithLifecycle()
+    val queueSize by vm.queueSize.collectAsStateWithLifecycle()
     BackHandler(enabled = searching) { vm.closeSearch() }
     BackHandler(enabled = drawerState.isOpen) { coroutineScope.launch { drawerState.close() } }
     // The selected feed was deleted in the meantime.
@@ -409,6 +420,11 @@ fun ArticleListScreen(
                 onOpenSettings = {
                     coroutineScope.launch { drawerState.close() }
                     onOpenSettings()
+                },
+                queueSize = queueSize,
+                onOpenScreen = {
+                    coroutineScope.launch { drawerState.close() }
+                    onOpenScreen(it)
                 },
             )
         },
@@ -510,6 +526,7 @@ fun ArticleListScreen(
                         onToggleRead = vm::toggleRead,
                         onToggleStar = vm::toggleStar,
                         onToggleArchived = vm::toggleArchived,
+                        onEnqueue = vm::enqueue,
                         downloads = downloads,
                     )
                 }
@@ -671,6 +688,7 @@ private fun ArticleList(
     onToggleRead: (ArticleListItem) -> Unit,
     onToggleStar: (ArticleListItem) -> Unit,
     onToggleArchived: (ArticleListItem) -> Unit,
+    onEnqueue: (ArticleListItem) -> Unit,
     downloads: Map<Long, DownloadProgress>,
 ) {
     val listState = rememberSaveable(listKey, saver = LazyListState.Saver) { LazyListState() }
@@ -710,7 +728,7 @@ private fun ArticleList(
     val now = remember(items) { System.currentTimeMillis() }
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
         items(items, key = { it.id }) { item ->
-            ArchiveSwipe(item, onArchive = { onToggleArchived(item) }) {
+            ArchiveSwipe(item, onArchive = { onToggleArchived(item) }, onEnqueue = { onEnqueue(item) }) {
                 ArticleRow(
                     item = item,
                     now = now,
@@ -737,13 +755,23 @@ private fun ArticleList(
     }
 }
 
-/** Swiping a row to the left archives it, or in the archive brings it back. */
+/**
+ * Swiping a row to the left archives it, or in the archive brings it back. Swiping an episode to
+ * the right puts it into the queue.
+ */
 @Composable
-private fun ArchiveSwipe(item: ArticleListItem, onArchive: () -> Unit, content: @Composable () -> Unit) {
+private fun ArchiveSwipe(
+    item: ArticleListItem,
+    onArchive: () -> Unit,
+    onEnqueue: () -> Unit,
+    content: @Composable () -> Unit,
+) {
     val currentOnArchive by rememberUpdatedState(onArchive)
+    val currentOnEnqueue by rememberUpdatedState(onEnqueue)
     val state = rememberSwipeToDismissBoxState(
         confirmValueChange = {
             if (it == SwipeToDismissBoxValue.EndToStart) currentOnArchive()
+            if (it == SwipeToDismissBoxValue.StartToEnd) currentOnEnqueue()
             // Never settle as dismissed: the list keeps this state per article, and a row that comes
             // back (undo, archive view) would stay swiped away. The list removes the row itself.
             false
@@ -751,8 +779,23 @@ private fun ArchiveSwipe(item: ArticleListItem, onArchive: () -> Unit, content: 
     )
     SwipeToDismissBox(
         state = state,
-        enableDismissFromStartToEnd = false,
+        enableDismissFromStartToEnd = item.hasAudio && !item.archived,
         backgroundContent = {
+            if (state.dismissDirection == SwipeToDismissBoxValue.StartToEnd) {
+                Row(
+                    Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primaryContainer).padding(horizontal = 24.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(AppIcons.QueueAdd, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Zur Warteschlange",
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+                return@SwipeToDismissBox
+            }
             Row(
                 Modifier.fillMaxSize().background(MaterialTheme.colorScheme.secondaryContainer).padding(horizontal = 24.dp),
                 horizontalArrangement = Arrangement.End,
@@ -852,6 +895,8 @@ private fun FeedDrawer(
     onSelect: (ListScope) -> Unit,
     onOpenFeeds: () -> Unit,
     onOpenSettings: () -> Unit,
+    queueSize: Int,
+    onOpenScreen: (String) -> Unit,
 ) {
     val itemPadding = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
     // Feeds without a folder first, then folder by folder.
@@ -896,6 +941,16 @@ private fun FeedDrawer(
                     modifier = itemPadding,
                 )
             }
+            item {
+                NavigationDrawerItem(
+                    label = { Text("Warteschlange") },
+                    icon = { Icon(AppIcons.QueueAdd, contentDescription = null) },
+                    badge = { CountBadge(queueSize) },
+                    selected = false,
+                    onClick = { onOpenScreen("queue") },
+                    modifier = itemPadding,
+                )
+            }
             item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
             groups.forEach { (category, members) ->
                 if (category.isNotEmpty()) {
@@ -925,6 +980,24 @@ private fun FeedDrawer(
                     icon = { Icon(Icons.Default.Edit, contentDescription = null) },
                     selected = false,
                     onClick = onOpenFeeds,
+                    modifier = itemPadding,
+                )
+            }
+            item {
+                NavigationDrawerItem(
+                    label = { Text("Statistik") },
+                    icon = { Icon(AppIcons.Stats, contentDescription = null) },
+                    selected = false,
+                    onClick = { onOpenScreen("stats") },
+                    modifier = itemPadding,
+                )
+            }
+            item {
+                NavigationDrawerItem(
+                    label = { Text("Podcasts entdecken") },
+                    icon = { Icon(AppIcons.Explore, contentDescription = null) },
+                    selected = false,
+                    onClick = { onOpenScreen("discover") },
                     modifier = itemPadding,
                 )
             }

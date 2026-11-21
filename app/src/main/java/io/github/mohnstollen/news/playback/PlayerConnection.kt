@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import io.github.mohnstollen.news.ui.container
 
 /** What the screens show about playback. */
 data class PlayerState(
@@ -50,6 +51,10 @@ class PlayerConnection(context: Context) {
     private var controller: MediaController? = null
     private val pending = mutableListOf<(MediaController) -> Unit>()
     private var ticker: Job? = null
+
+    private val repo = context.container.repository
+    val sleepTimer = context.container.sleepTimer
+    val queue = repo.queueDao.observe()
 
     private val _state = MutableStateFlow(PlayerState())
     val state: StateFlow<PlayerState> = _state
@@ -120,6 +125,14 @@ class PlayerConnection(context: Context) {
     }
 
     fun pause() = command { it.pause() }
+
+    /** Skips to the first episode of the queue; the current one keeps its position. */
+    fun playNext() {
+        main.launch {
+            val next = repo.takeNextInQueue() ?: return@launch
+            play(next)
+        }
+    }
 
     fun seekBack() = command { it.seekBack() }
 
