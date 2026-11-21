@@ -15,6 +15,12 @@ import java.util.concurrent.TimeUnit
 const val USER_AGENT = "Mozilla/5.0 (Linux; Android) NewsReader/1.0"
 private const val MAX_BODY_BYTES = 8 * 1024 * 1024
 
+/**
+ * Feeds of long-running podcasts list every episode with long show notes and can be much larger
+ * than a web page. They are read up to this size; the newest entries come first.
+ */
+private const val MAX_FEED_BYTES = 10 * 1024 * 1024
+
 fun newHttpClient(): OkHttpClient = OkHttpClient.Builder()
     .connectTimeout(15, TimeUnit.SECONDS)
     .readTimeout(30, TimeUnit.SECONDS)
@@ -24,9 +30,14 @@ fun newHttpClient(): OkHttpClient = OkHttpClient.Builder()
 /** Error with a message that can be shown to the user as is. */
 class FeedException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
-private class Body(val bytes: ByteArray, val charset: String?)
+/** [truncated]: the response was longer than allowed and only its beginning was read. */
+private class Body(val bytes: ByteArray, val charset: String?, val truncated: Boolean = false)
 
-private fun Response.readLimited(): Body {
+/**
+ * Reads at most [limit] bytes. Beyond that, a page is refused; a feed ([cut] = true) is cut off,
+ * as its beginning still holds the newest entries.
+ */
+private fun Response.readLimited(limit: Int = MAX_BODY_BYTES, cut: Boolean = false): Body {
     val body = body ?: throw IOException("Leere Antwort")
     val charset = body.contentType()?.charset()?.name()
     val out = ByteArrayOutputStream()
@@ -36,7 +47,10 @@ private fun Response.readLimited(): Body {
             val n = input.read(buf)
             if (n < 0) break
             out.write(buf, 0, n)
-            if (out.size() > MAX_BODY_BYTES) throw IOException("Antwort ist zu groß")
+            if (out.size() > limit) {
+                if (cut) return Body(out.toByteArray(), charset, truncated = true)
+                throw IOException("Die Seite ist größer als ${limit / (1024 * 1024)} MB")
+            }
         }
     }
     return Body(out.toByteArray(), charset)
@@ -72,7 +86,7 @@ class FeedFetcher(private val client: OkHttpClient) {
         client.newCall(request).execute().use { response ->
             if (response.code == 304) return Result.NotModified
             if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
-            val body = response.readLimited()
+            val body = response.readLimited(MAX_FEED_BYTES, cut = true)
             val feed = parseFeed(body, response.request.url.toString())
             return Result.Fetched(feed, response.header("ETag"), response.header("Last-Modified"))
         }
@@ -80,7 +94,9 @@ class FeedFetcher(private val client: OkHttpClient) {
 
     private fun parseFeed(body: Body, baseUrl: String): ParsedFeed {
         val doc = Jsoup.parse(ByteArrayInputStream(body.bytes), body.charset, baseUrl, Parser.xmlParser())
-        return FeedParser.parse(doc, baseUrl)
+        val feed = FeedParser.parse(doc, baseUrl)
+        // The parser closes what the cut left open; the last entry is incomplete, so it goes.
+        return if (body.truncated) feed.copy(items = feed.items.dropLast(1)) else feed
     }
 
     /**
@@ -97,7 +113,8 @@ class FeedFetcher(private val client: OkHttpClient) {
         val (body, finalUrl) = try {
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) throw FeedException("Seite nicht erreichbar (HTTP ${response.code})")
-                response.readLimited() to response.request.url.toString()
+                // Long enough for a large feed; a web page that big is refused below anyway.
+                response.readLimited(MAX_FEED_BYTES, cut = true) to response.request.url.toString()
             }
         } catch (e: IOException) {
             throw FeedException("Seite nicht erreichbar: ${e.message ?: e.javaClass.simpleName}", e)

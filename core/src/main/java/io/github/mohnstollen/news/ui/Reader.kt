@@ -72,6 +72,7 @@ import java.util.Date
 
 class ReaderViewModel(app: Application, handle: SavedStateHandle) : AndroidViewModel(app) {
     private val repo = app.container.repository
+    private val features = app.container.features
     private val id: Long = checkNotNull(handle["id"])
 
     val article = repo.articleDao.observe(id)
@@ -91,7 +92,9 @@ class ReaderViewModel(app: Application, handle: SavedStateHandle) : AndroidViewM
             val loaded = repo.articleDao.observe(id).filterNotNull().first()
             val f = repo.feedDao.byId(loaded.feedId)
             feed.value = f
-            if (f?.fetchFullText == true && loaded.fullText == null && loaded.link != null) loadFullText(silent = true)
+            if (features.fullText && f?.fetchFullText == true && loaded.fullText == null && loaded.link != null) {
+                loadFullText(silent = true)
+            }
         }
     }
 
@@ -208,11 +211,11 @@ fun ReaderScreen(onBack: () -> Unit, onOpenArticle: (Long) -> Unit, vm: ReaderVi
                             .setType("text/plain")
                             .putExtra(Intent.EXTRA_SUBJECT, a.title)
                             .putExtra(Intent.EXTRA_TEXT, text)
-                        context.startActivity(Intent.createChooser(send, "Artikel teilen"))
+                        context.startActivity(Intent.createChooser(send, context.features.pick("Artikel teilen", "Folge teilen")))
                     }) {
                         Icon(Icons.Default.Share, contentDescription = "Teilen")
                     }
-                    if (a.link != null) {
+                    if (a.link != null && context.features.fullText) {
                         val showsFullText = a.fullText != null && preferFullText
                         IconButton(
                             enabled = !loading,
@@ -243,7 +246,10 @@ fun ReaderScreen(onBack: () -> Unit, onOpenArticle: (Long) -> Unit, vm: ReaderVi
                         }
                     }
                     IconButton(onClick = { vm.markUnread(onBack) }) {
-                        Icon(AppIcons.MarkUnread, contentDescription = "Als ungelesen markieren")
+                        Icon(
+                            AppIcons.MarkUnread,
+                            contentDescription = context.features.pick("Als ungelesen markieren", "Als offen markieren"),
+                        )
                     }
                 },
             )
@@ -260,6 +266,10 @@ fun ReaderScreen(onBack: () -> Unit, onOpenArticle: (Long) -> Unit, vm: ReaderVi
                 val body = (if (preferFullText) a.fullText else null) ?: a.content
                 val html = remember(a.id, a.title, a.note, body, feed, colors) {
                     articleHtml(
+                        emptyText = context.features.pick(
+                            "Dieser Feed liefert keinen Text. Das Textsymbol oben lädt den Volltext.",
+                            "Zu dieser Folge gibt es keine Shownotes.",
+                        ),
                         article = a,
                         feedTitle = feed?.title,
                         body = body,
@@ -341,7 +351,7 @@ private fun NoteDialog(initial: String, onSave: (String) -> Unit, onDismiss: () 
             OutlinedTextField(
                 value = text,
                 onValueChange = { text = it },
-                placeholder = { Text("Notiz zu diesem Artikel") },
+                placeholder = { Text(LocalContext.current.features.pick("Notiz zu diesem Artikel", "Notiz zu dieser Folge")) },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp),
             )
         },
@@ -396,13 +406,14 @@ internal fun articleHtml(
     link: Color,
     noteBackground: Color,
     noteText: Color,
+    emptyText: String = "Dieser Feed liefert keinen Text. Das Textsymbol oben lädt den Volltext.",
 ): String {
     val date = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(article.pubDate))
     val meta = listOfNotNull(feedTitle, article.author, date).joinToString(" · ") { TextUtils.htmlEncode(it) }
     val note = article.note?.takeIf { it.isNotBlank() }
         ?.let { "<div class=\"note\"><b>Notiz</b><br>${TextUtils.htmlEncode(it)}</div>" }.orEmpty()
     val content = body?.takeIf { it.isNotBlank() }
-        ?: "<p class=\"meta\">Dieser Feed liefert keinen Text. Das Textsymbol oben lädt den Volltext.</p>"
+        ?: "<p class=\"meta\">${TextUtils.htmlEncode(emptyText)}</p>"
     // The headline links to the article; the WebView hands links to the browser.
     val title = TextUtils.htmlEncode(article.title)
     val headline = article.link?.let { "<a href=\"${TextUtils.htmlEncode(it)}\">$title</a>" } ?: title

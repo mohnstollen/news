@@ -219,6 +219,7 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_READY) learnDuration()
             if (playbackState != Player.STATE_ENDED) return
             val id = currentArticleId() ?: return
             val downloads = container.downloads
@@ -241,6 +242,14 @@ class PlaybackService : MediaSessionService() {
                 container.settings.update { it.copy(playbackSpeed = speed) }
             }
         }
+    }
+
+    /** Many feeds do not state the length; the player knows it once the file is open. */
+    private fun learnDuration() {
+        val player = session?.player ?: return
+        val id = currentArticleId() ?: return
+        val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: return
+        repo.scope.launch { repo.articleDao.learnDuration(id, duration / 1000) }
     }
 
     private fun endBufferMs(): Long = container.settings.current.endBufferSeconds * 1000L

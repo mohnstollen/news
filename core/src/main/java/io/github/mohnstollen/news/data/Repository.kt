@@ -59,6 +59,17 @@ class Repository(
 
     suspend fun refreshAll(): RefreshResult = refresh(null)
 
+    /** Loads a feed without subscribing to it, e.g. to look at a podcast first. */
+    suspend fun previewFeed(url: String): ParsedFeed = withContext(Dispatchers.IO) {
+        try {
+            fetcher.discover(url).feed
+        } catch (e: FeedException) {
+            throw e
+        } catch (e: java.io.IOException) {
+            throw FeedException("Feed nicht erreichbar: ${e.message ?: e.javaClass.simpleName}", e)
+        }
+    }
+
     /** Refreshes one feed, or all if [feedId] is null. Does nothing if a refresh is already running. */
     suspend fun refresh(feedId: Long?): RefreshResult = withContext(Dispatchers.IO) {
         if (!refreshMutex.tryLock()) return@withContext RefreshResult(0, 0, skipped = true)

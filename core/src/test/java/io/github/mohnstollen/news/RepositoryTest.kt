@@ -443,6 +443,37 @@ class RepositoryTest {
     }
 
     @Test
+    fun aVeryLargeFeedIsCutInsteadOfRefused() = runBlocking {
+        val d = device()
+        // About 12 MB: 600 episodes with long show notes, newest first.
+        val notes = "<p>" + "Shownotes mit vielen Links und Kapiteln. ".repeat(500) + "</p>"
+        val format = DateTimeFormatter.RFC_1123_DATE_TIME.withLocale(Locale.ENGLISH)
+        val xml = buildString {
+            append("<?xml version=\"1.0\" encoding=\"UTF-8\"?><rss version=\"2.0\"><channel><title>Langer Podcast</title>")
+            for (n in 600 downTo 1) {
+                val date = format.format(Instant.now().minusSeconds(n * 3600L).atOffset(ZoneOffset.UTC))
+                append("<item><guid>ep$n</guid><title>Folge $n</title><pubDate>$date</pubDate>")
+                append("<enclosure url=\"${url("/ep$n.mp3")}\" type=\"audio/mpeg\"/>")
+                append("<description><![CDATA[$notes]]></description></item>")
+            }
+            append("</channel></rss>")
+        }
+        assertTrue(xml.length > 11 * 1024 * 1024)
+        serve("/gross.xml", xml)
+
+        val feed = d.repo.addFeed(url("/gross.xml"), null)
+        assertEquals("Langer Podcast", feed.title)
+        val titles = d.repo.articleDao.observeList(null, false).first().map { it.title }
+        assertTrue("most episodes are there", titles.size in 400..599)
+        assertTrue("the newest first", "Folge 600" in titles)
+        assertTrue("the oldest did not fit", "Folge 1" !in titles)
+        // The cut-off entry is left out rather than stored half.
+        val last = d.repo.articleDao.byGuid(feed.id, "ep${601 - titles.size}")!!
+        assertTrue(last.content!!.endsWith("</p>"))
+        assertEquals(0, d.repo.refresh(feed.id).failedFeeds)
+    }
+
+    @Test
     fun fullTextIsExtractedFromTheLinkedPage() = runBlocking {
         val d = device()
         val paragraphs = (1..8).joinToString("") {

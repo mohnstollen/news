@@ -70,14 +70,37 @@ class Recommender(
         }
     }
 
-    suspend fun recommend(maxSeeds: Int = 5, perSeed: Int = 4): List<Recommendation> = withContext(Dispatchers.IO) {
+    /** The subscribed podcasts suggestions can start from, the most listened first. */
+    suspend fun seeds(): List<Feed> = withContext(Dispatchers.IO) {
+        val listened = repo.listenDao.feedUrls().map(::normalize).toSet()
+        repo.feedDao.all().filter { repo.articleDao.hasEpisodes(it.id) }
+            .sortedWith(compareByDescending<Feed> { normalize(it.url) in listened }.thenBy { it.title.lowercase() })
+    }
+
+    /**
+     * Suggestions for the podcast [seedFeedId], or for the first [maxSeeds] subscribed podcasts
+     * (most listened first) when it is null.
+     */
+    /** Loads a catalogue podcast's feed for a look before subscribing. */
+    suspend fun preview(podcast: CatalogPodcast): PodcastPreview = withContext(Dispatchers.IO) {
+        val feed = repo.previewFeed(podcast.feedUrl)
+        val episodes = feed.items.filter { it.pubDate != null }.sortedByDescending { it.pubDate }
+        PodcastPreview(
+            title = feed.title.ifBlank { podcast.title },
+            episodeCount = feed.items.size,
+            rhythm = Rhythm.describe(episodes.mapNotNull { it.pubDate }),
+            latest = episodes.take(PREVIEW_EPISODES).map { PreviewEpisode(it.title, it.pubDate!!, it.durationSeconds) },
+        )
+    }
+
+    suspend fun recommend(
+        seedFeedId: Long? = null,
+        maxSeeds: Int = 5,
+        perSeed: Int = if (seedFeedId != null) 12 else 4,
+    ): List<Recommendation> = withContext(Dispatchers.IO) {
         val feeds = repo.feedDao.all()
         val subscribed = feeds.map { normalize(it.url) }.toSet()
-        // Podcasts only, the most listened first.
-        val listened = repo.listenDao.feedUrls().map(::normalize).toSet()
-        val podcasts = feeds.filter { repo.articleDao.hasEpisodes(it.id) }
-            .sortedByDescending { normalize(it.url) in listened }
-            .take(maxSeeds)
+        val podcasts = seeds().filter { seedFeedId == null || it.id == seedFeedId }.take(maxSeeds)
         val seen = mutableSetOf<String>()
         val out = mutableListOf<Recommendation>()
         for (feed in podcasts) {
@@ -109,6 +132,39 @@ class Recommender(
 
     private fun normalize(url: String) =
         url.trim().removePrefix("https://").removePrefix("http://").removePrefix("www.").trimEnd('/').lowercase()
+}
+
+data class PreviewEpisode(val title: String, val pubDate: Long, val durationSeconds: Long?)
+
+data class PodcastPreview(
+    val title: String,
+    val episodeCount: Int,
+    /** E.g. "etwa wöchentlich"; null with too few dated episodes. */
+    val rhythm: String?,
+    val latest: List<PreviewEpisode>,
+)
+
+private const val PREVIEW_EPISODES = 10
+
+/** How often a podcast publishes, from its episodes' dates. */
+object Rhythm {
+    private const val DAY = 24 * 60 * 60 * 1000.0
+
+    /** [dates] in epoch milliseconds, any order. Looks at the newest ten episodes. */
+    fun describe(dates: List<Long>): String? {
+        val newest = dates.sortedDescending().take(10)
+        if (newest.size < 3) return null
+        val gaps = newest.zipWithNext { a, b -> (a - b) / DAY }.sorted()
+        val median = gaps[gaps.size / 2]
+        return when {
+            median < 1.5 -> "etwa täglich"
+            median < 5 -> "mehrmals pro Woche"
+            median < 10 -> "etwa wöchentlich"
+            median < 20 -> "etwa alle zwei Wochen"
+            median < 45 -> "etwa monatlich"
+            else -> "selten"
+        }
+    }
 }
 
 /** The words that stand out in a podcast's episode titles. */

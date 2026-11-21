@@ -87,6 +87,25 @@ object Episodes {
         return total?.let(::minutes)
     }
 
+    /**
+     * Time left in a list of episodes: the rest of each one with a known length, and how many
+     * have none. [items] are (length in seconds or null, position in ms).
+     */
+    fun remaining(items: List<Pair<Long?, Long>>): Pair<Long, Int> {
+        var ms = 0L
+        var unknown = 0
+        for ((seconds, position) in items) {
+            if (seconds == null || seconds <= 0) unknown++ else ms += (seconds * 1000 - position).coerceAtLeast(0)
+        }
+        return ms to unknown
+    }
+
+    /** Total time for headings: "12:34 Std", "45 Min". */
+    fun total(ms: Long): String {
+        val minutes = (ms + 59_999) / 60_000
+        return if (minutes < 60) "$minutes Min" else String.format(Locale.ROOT, "%d:%02d Std", minutes / 60, minutes % 60)
+    }
+
     /** "45 Min", "1 Std 5 Min"; at least one minute. */
     fun minutes(seconds: Long): String {
         val total = ((seconds + 59) / 60).coerceAtLeast(1)

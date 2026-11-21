@@ -34,9 +34,11 @@ object Notifier {
     /** Replaces an earlier notification. [articles] are expected newest first. Returns false if not shown. */
     fun showNewArticles(context: Context, articles: List<ArticleListItem>): Boolean {
         if (articles.isEmpty() || !canNotify(context)) return false
+        val words = (context.applicationContext as? io.github.mohnstollen.news.NewsApp)?.features
+            ?: io.github.mohnstollen.news.AppFeatures.NEWS
         val manager = NotificationManagerCompat.from(context)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Neue Artikel", NotificationManager.IMPORTANCE_DEFAULT),
+            NotificationChannel(CHANNEL, words.pick("Neue Artikel", "Neue Folgen"), NotificationManager.IMPORTANCE_DEFAULT),
         )
 
         val single = articles.singleOrNull()
@@ -63,7 +65,7 @@ object Notifier {
             val style = NotificationCompat.InboxStyle()
             articles.take(MAX_LINES).forEach { style.addLine("${it.feedTitle}: ${it.title}") }
             if (articles.size > MAX_LINES) style.setSummaryText("und ${articles.size - MAX_LINES} weitere")
-            builder.setContentTitle("${articles.size} neue Artikel")
+            builder.setContentTitle("${articles.size} " + words.pick("neue Artikel", "neue Folgen"))
                 .setContentText(feeds.take(3).joinToString(", ") + if (feeds.size > 3) " …" else "")
                 .setStyle(style)
         }

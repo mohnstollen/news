@@ -44,7 +44,7 @@ import kotlinx.coroutines.launch
 /** The episodes that play after the current one, in order. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun QueueScreen(onBack: () -> Unit, onOpenArticle: (Long) -> Unit) {
+fun QueueScreen(onBack: (() -> Unit)?, onOpenArticle: (Long) -> Unit) {
     val repo = LocalContext.current.container.repository
     val items by remember { repo.queueDao.observe() }.collectAsStateWithLifecycle(emptyList())
     val scope = rememberCoroutineScope()
@@ -54,7 +54,9 @@ fun QueueScreen(onBack: () -> Unit, onOpenArticle: (Long) -> Unit) {
             TopAppBar(
                 title = { Text("Warteschlange") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück") }
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück") }
+                    }
                 },
                 actions = {
                     if (items.isNotEmpty()) TextButton(onClick = { scope.launch { repo.queueDao.clear() } }) { Text("Leeren") }
@@ -66,7 +68,7 @@ fun QueueScreen(onBack: () -> Unit, onOpenArticle: (Long) -> Unit) {
         if (items.isEmpty()) {
             Box(Modifier.padding(padding).fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                 Text(
-                    "Die Warteschlange ist leer.\nFolgen kommen hinein über den Knopf im Artikel oder indem du sie " +
+                    "Die Warteschlange ist leer.\nFolgen kommen hinein über den Knopf in der Folge oder indem du sie " +
                         "in der Liste nach rechts wischst. Sie laufen nacheinander, wenn eine Folge zu Ende ist.",
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -75,6 +77,24 @@ fun QueueScreen(onBack: () -> Unit, onOpenArticle: (Long) -> Unit) {
             return@Scaffold
         }
         LazyColumn(Modifier.padding(padding).fillMaxSize()) {
+            item {
+                val (left, unknown) = Episodes.remaining(items.map { it.durationSeconds to it.playPosition })
+                val parts = listOfNotNull(
+                    if (items.size == 1) "1 Folge" else "${items.size} Folgen",
+                    "${Episodes.total(left)} verbleibend".takeIf { left > 0 },
+                    when (unknown) {
+                        0 -> null
+                        1 -> "1 ohne Längenangabe"
+                        else -> "$unknown ohne Längenangabe"
+                    },
+                )
+                Text(
+                    parts.joinToString(" · "),
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            }
             itemsIndexed(items, key = { _, it -> it.id }) { index, item ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -85,10 +105,11 @@ fun QueueScreen(onBack: () -> Unit, onOpenArticle: (Long) -> Unit) {
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        // The length first: the podcast's name is often long and gets cut off.
                         val details = listOfNotNull(
+                            Episodes.label(item.durationSeconds, item.playPosition, 0) ?: "Länge unbekannt",
+                            "geladen".takeIf { item.downloaded },
                             item.feedTitle,
-                            Episodes.label(item.durationSeconds, item.playPosition, 0),
-                            "heruntergeladen".takeIf { item.downloaded },
                         )
                         Text(
                             details.joinToString(" · "),

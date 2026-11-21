@@ -70,6 +70,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun FeedsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
+    val words = context.features
     val repo = remember { context.container.repository }
     val feeds by remember { repo.feedDao.observeWithUnread() }.collectAsStateWithLifecycle(emptyList())
     val scope = rememberCoroutineScope()
@@ -96,8 +97,9 @@ fun FeedsScreen(onBack: () -> Unit) {
                 snackbar.showSnackbar(
                     when {
                         total == 0 -> "Die Datei enthält keine Feeds"
-                        added == 0 -> "Alle $total Feeds waren bereits abonniert"
-                        else -> "$added von $total Feeds importiert, Artikel werden geladen"
+                        added == 0 -> "Alle $total " + words.pick("Feeds", "Podcasts") + " waren bereits abonniert"
+                        else -> "$added von $total " + words.pick("Feeds importiert, Artikel", "Podcasts importiert, Folgen") +
+                            " werden geladen"
                     },
                 )
             } catch (e: CancellationException) {
@@ -117,7 +119,7 @@ fun FeedsScreen(onBack: () -> Unit) {
                         context.contentResolver.openOutputStream(uri, "wt")?.use { it.write(opml.toByteArray()) }
                             ?: throw FeedException("Die Datei konnte nicht geschrieben werden")
                     }
-                    snackbar.showSnackbar("${feeds.size} Feeds exportiert")
+                    snackbar.showSnackbar("${feeds.size} " + words.pick("Feeds", "Podcasts") + " exportiert")
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -165,7 +167,10 @@ fun FeedsScreen(onBack: () -> Unit) {
         if (feeds.isEmpty()) {
             Box(Modifier.padding(padding).fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                 Text(
-                    "Noch keine Feeds. Füge einen Feed hinzu oder importiere eine OPML-Datei über das Menü.",
+                    words.pick(
+                        "Noch keine Feeds. Füge einen Feed hinzu oder importiere eine OPML-Datei über das Menü.",
+                        "Noch keine Podcasts. Füge einen hinzu, finde einen unter „Podcasts entdecken“ oder importiere eine OPML-Datei über das Menü.",
+                    ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
@@ -208,9 +213,15 @@ fun FeedsScreen(onBack: () -> Unit) {
     feeds.firstOrNull { it.feed.id == deleteId }?.let { entry ->
         AlertDialog(
             onDismissRequest = { deleteId = null },
-            title = { Text("Feed löschen?") },
+            title = { Text(words.pick("Feed löschen?", "Podcast abbestellen?")) },
             text = {
-                Text("„${entry.feed.title}“ und alle zugehörigen Artikel werden entfernt, auch gemerkte Artikel und Notizen.")
+                Text(
+                    "„${entry.feed.title}“ und " + words.pick(
+                        "alle zugehörigen Artikel werden entfernt, auch gemerkte Artikel und Notizen.",
+                        "alle zugehörigen Folgen werden entfernt, auch gemerkte, heruntergeladene und Notizen. " +
+                            "Die Statistik bleibt.",
+                    ),
+                )
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -243,8 +254,8 @@ private fun FeedRow(entry: FeedWithUnread, onEdit: () -> Unit, onDelete: () -> U
             )
             val status = buildList {
                 feed.category?.let { add(it) }
-                add(if (entry.unread == 1) "1 ungelesen" else "${entry.unread} ungelesen")
-                if (feed.fetchFullText) add("Volltext")
+                add("${entry.unread} " + LocalContext.current.features.pick("ungelesen", "offen"))
+                if (feed.fetchFullText && LocalContext.current.features.fullText) add("Volltext")
                 if (!feed.notify) add("stumm")
                 if (feed.autoDownload && podcasts) add("lädt Folgen")
                 add(
@@ -328,7 +339,7 @@ private fun AddFeedDialog(
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it; error = null },
-                    label = { Text("Adresse des Feeds oder der Website") },
+                    label = { Text(LocalContext.current.features.pick("Adresse des Feeds oder der Website", "Adresse des Podcast-Feeds oder der Website")) },
                     placeholder = { Text("beispiel.de/feed") },
                     singleLine = true,
                     enabled = !busy,
@@ -350,7 +361,7 @@ private fun AddFeedDialog(
                     Switch(checked = autoDownload, onCheckedChange = { autoDownload = it }, enabled = !busy)
                 }
                 if (busy) {
-                    Text("Feed wird geprüft …", style = MaterialTheme.typography.bodySmall)
+                    Text(LocalContext.current.features.pick("Feed", "Podcast") + " wird geprüft …", style = MaterialTheme.typography.bodySmall)
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
             }
@@ -405,7 +416,7 @@ private fun EditFeedDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Feed bearbeiten") },
+        title = { Text(LocalContext.current.features.pick("Feed bearbeiten", "Podcast bearbeiten")) },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -429,7 +440,7 @@ private fun EditFeedDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 FolderField(value = category, onChange = { category = it }, folders = folders, enabled = !busy)
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                if (LocalContext.current.features.fullText) Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Volltext automatisch laden")
                         Text(
@@ -443,7 +454,7 @@ private fun EditFeedDialog(
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Bei neuen Artikeln benachrichtigen")
+                        Text(LocalContext.current.features.pick("Bei neuen Artikeln benachrichtigen", "Bei neuen Folgen benachrichtigen"))
                         Text(
                             "Wirkt nur, wenn Benachrichtigungen in den Einstellungen eingeschaltet sind.",
                             style = MaterialTheme.typography.bodySmall,

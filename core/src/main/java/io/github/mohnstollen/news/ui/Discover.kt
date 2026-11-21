@@ -47,7 +47,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.mohnstollen.news.data.CatalogPodcast
 import io.github.mohnstollen.news.data.FeedException
+import io.github.mohnstollen.news.data.PodcastPreview
 import io.github.mohnstollen.news.data.Recommendation
+import io.github.mohnstollen.news.playback.Episodes
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -67,6 +76,12 @@ fun DiscoverScreen(onBack: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val subscribed = remember { mutableStateListOf<String>() }
+    // Only local data: which subscribed podcast to start from. null = all of them.
+    var seeds by remember { mutableStateOf<List<io.github.mohnstollen.news.data.Feed>>(emptyList()) }
+    LaunchedEffect(Unit) { seeds = container.recommender.seeds() }
+    var seed by rememberSaveable { mutableStateOf<Long?>(null) }
+    var seedMenu by remember { mutableStateOf(false) }
+    var previewOf by remember { mutableStateOf<CatalogPodcast?>(null) }
 
     fun run(block: suspend () -> Unit) {
         busy = true
@@ -126,18 +141,35 @@ fun DiscoverScreen(onBack: () -> Unit) {
                         keyboardActions = KeyboardActions(onSearch = { if (query.isNotBlank()) run { results = container.recommender.search(query) } }),
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    if (suggestions == null) {
-                        Text("Vorschläge für dich", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "Sucht im öffentlichen Podcast-Katalog von Apple nach Podcasts, die zu deinen passen: " +
-                                "gleiche Kategorie, ähnliche Themen. Dafür gehen die Namen deiner Podcasts und einige " +
-                                "Stichwörter aus ihren Folgentiteln an Apple. Ohne Konto, und nur wenn du hier tippst.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    Text("Ähnliche Podcasts", style = MaterialTheme.typography.titleMedium)
+                    ExposedDropdownMenuBox(expanded = seedMenu, onExpandedChange = { seedMenu = it }) {
+                        OutlinedTextField(
+                            value = seeds.firstOrNull { it.id == seed }?.title ?: "Alle meine Podcasts",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Ähnlich zu") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = seedMenu) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
                         )
-                        Button(onClick = { run { suggestions = container.recommender.recommend() } }, enabled = !busy) {
-                            Text("Vorschläge laden")
+                        ExposedDropdownMenu(expanded = seedMenu, onDismissRequest = { seedMenu = false }) {
+                            DropdownMenuItem(text = { Text("Alle meine Podcasts") }, onClick = { seed = null; seedMenu = false })
+                            seeds.forEach { feed ->
+                                DropdownMenuItem(
+                                    text = { Text(feed.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    onClick = { seed = feed.id; seedMenu = false },
+                                )
+                            }
                         }
+                    }
+                    Text(
+                        "Sucht im öffentlichen Podcast-Katalog von Apple nach Podcasts mit gleicher Kategorie und " +
+                            "ähnlichen Themen. Dafür gehen Podcast-Namen und einige Stichwörter aus den Folgentiteln an " +
+                            "Apple. Ohne Konto, und nur wenn du hier tippst.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Button(onClick = { run { suggestions = container.recommender.recommend(seed) } }, enabled = !busy) {
+                        Text("Vorschläge laden")
                     }
                     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
@@ -147,7 +179,13 @@ fun DiscoverScreen(onBack: () -> Unit) {
             results?.let { list ->
                 item { SectionHeader(if (list.isEmpty()) "Keine Treffer" else "Suchergebnisse") }
                 items(list, key = { "r" + it.feedUrl }) { podcast ->
-                    PodcastRow(podcast, reason = null, subscribed = podcast.feedUrl in subscribed, onSubscribe = { subscribe(podcast) })
+                    PodcastRow(
+                        podcast,
+                        reason = null,
+                        subscribed = podcast.feedUrl in subscribed,
+                        onSubscribe = { subscribe(podcast) },
+                        onOpen = { previewOf = podcast },
+                    )
                 }
             }
 
@@ -166,10 +204,98 @@ fun DiscoverScreen(onBack: () -> Unit) {
                         reason = reason,
                         subscribed = rec.podcast.feedUrl in subscribed,
                         onSubscribe = { subscribe(rec.podcast) },
+                        onOpen = { previewOf = rec.podcast },
                     )
                 }
             }
         }
+    }
+
+    previewOf?.let { podcast ->
+        PreviewSheet(
+            podcast = podcast,
+            subscribed = podcast.feedUrl in subscribed,
+            onSubscribe = { subscribe(podcast) },
+            onDismiss = { previewOf = null },
+        )
+    }
+}
+
+/** A catalogue podcast's latest episodes and how often it publishes, before subscribing. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PreviewSheet(podcast: CatalogPodcast, subscribed: Boolean, onSubscribe: () -> Unit, onDismiss: () -> Unit) {
+    val recommender = LocalContext.current.container.recommender
+    var preview by remember(podcast) { mutableStateOf<PodcastPreview?>(null) }
+    var error by remember(podcast) { mutableStateOf<String?>(null) }
+    LaunchedEffect(podcast) {
+        try {
+            preview = recommender.preview(podcast)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error = (e as? FeedException)?.message ?: "Der Podcast lässt sich gerade nicht laden"
+        }
+    }
+    val dateFormat = remember { java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM) }
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp)) {
+            item {
+                Text(podcast.title, style = MaterialTheme.typography.titleLarge)
+                Text(
+                    listOfNotNull(podcast.author.ifBlank { null }, podcast.genre).joinToString(" · "),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                val p = preview
+                when {
+                    error != null -> Text(error!!, color = MaterialTheme.colorScheme.error)
+                    p == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
+                    else -> {
+                        val newest = p.latest.firstOrNull()?.pubDate
+                        val facts = listOfNotNull(
+                            p.rhythm?.let { "Erscheint $it" },
+                            newest?.let { "letzte Folge " + daysAgo(it) },
+                            if (p.episodeCount == 1) "1 Folge" else "${p.episodeCount} Folgen",
+                        )
+                        Text(facts.joinToString(" · "), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                if (subscribed) {
+                    Text("Abonniert", color = MaterialTheme.colorScheme.primary)
+                } else {
+                    Button(onClick = onSubscribe) { Text("Abonnieren") }
+                }
+                Spacer(Modifier.height(16.dp))
+                if (preview?.latest?.isNotEmpty() == true) Text("Letzte Folgen", style = MaterialTheme.typography.titleMedium)
+            }
+            items(preview?.latest.orEmpty()) { episode ->
+                Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                    Text(
+                        listOfNotNull(
+                            dateFormat.format(java.util.Date(episode.pubDate)),
+                            episode.durationSeconds?.let(Episodes::minutes),
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(episode.title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            }
+        }
+    }
+}
+
+/** "heute", "gestern", "vor 5 Tagen". */
+internal fun daysAgo(millis: Long, now: Long = System.currentTimeMillis()): String {
+    val days = ((now - millis) / (24 * 60 * 60 * 1000L)).coerceAtLeast(0)
+    return when (days) {
+        0L -> "heute"
+        1L -> "gestern"
+        else -> "vor $days Tagen"
     }
 }
 
@@ -179,12 +305,18 @@ private fun SectionHeader(text: String) {
 }
 
 @Composable
-private fun PodcastRow(podcast: CatalogPodcast, reason: String?, subscribed: Boolean, onSubscribe: () -> Unit) {
+private fun PodcastRow(
+    podcast: CatalogPodcast,
+    reason: String?,
+    subscribed: Boolean,
+    onSubscribe: () -> Unit,
+    onOpen: () -> Unit,
+) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).clickable(onClickLabel = "Letzte Folgen ansehen", onClick = onOpen)) {
             reason?.let {
                 Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(2.dp))

@@ -723,7 +723,7 @@ class PodfangModeUiTest : UiTestBase() {
     @Test(timeout = 120000)
     fun podfangUsesItsNameWordingAndFolder() {
         waitFor("Alle Folgen")
-        compose.onNodeWithContentDescription("Feeds anzeigen").performClick()
+        compose.onNodeWithContentDescription("Podcasts anzeigen").performClick()
         waitFor("Podfang")
         compose.onNodeWithText("Warteschlange").assertIsDisplayed()
         openFromDrawer("Podcasts verwalten")

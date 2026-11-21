@@ -265,6 +265,16 @@ data class ArticleListItem(
 
 data class DownloadRow(val id: Long, val downloadPath: String)
 
+data class DownloadedEpisode(
+    val id: Long,
+    val title: String,
+    val feedTitle: String,
+    val durationSeconds: Long?,
+    val playPosition: Long,
+    val downloadPath: String,
+    val pubDate: Long,
+)
+
 /** Which articles [ArticleDao.observeList] returns, by archive state. */
 const val NOT_ARCHIVED = 0
 const val ARCHIVED = 1
@@ -499,6 +509,16 @@ interface ArticleDao {
         imageUrl: String?,
     )
 
+
+    /** The player found out the length; only fills it in where the feed did not say. */
+    @Query("UPDATE articles SET durationSeconds = :seconds WHERE id = :id AND durationSeconds IS NULL")
+    suspend fun learnDuration(id: Long, seconds: Long)
+
+    @Query(
+        "SELECT a.id, a.title, f.title AS feedTitle, a.durationSeconds, a.playPosition, a.downloadPath, a.pubDate " +
+            "FROM articles a JOIN feeds f ON f.id = a.feedId WHERE a.downloadPath IS NOT NULL ORDER BY a.pubDate DESC",
+    )
+    fun observeDownloaded(): Flow<List<DownloadedEpisode>>
 
     @Query("UPDATE articles SET playPosition = :positionMs WHERE id = :id")
     suspend fun setPlayPosition(id: Long, positionMs: Long)

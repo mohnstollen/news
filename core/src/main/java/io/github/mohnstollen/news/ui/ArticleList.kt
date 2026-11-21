@@ -327,15 +327,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         repo.scope.launch {
             val result = repo.refresh(feedId)
             if (result.skipped) return@launch
+            val w = container.features
             val news = when (result.newArticles) {
-                0 -> "Keine neuen Artikel"
-                1 -> "1 neuer Artikel"
-                else -> "${result.newArticles} neue Artikel"
+                0 -> w.pick("Keine neuen Artikel", "Keine neuen Folgen")
+                1 -> w.pick("1 neuer Artikel", "1 neue Folge")
+                else -> "${result.newArticles} " + w.pick("neue Artikel", "neue Folgen")
             }
             val errors = when (result.failedFeeds) {
                 0 -> ""
-                1 -> " · 1 Feed nicht erreichbar"
-                else -> " · ${result.failedFeeds} Feeds nicht erreichbar"
+                1 -> " · " + w.pick("1 Feed", "1 Podcast") + " nicht erreichbar"
+                else -> " · ${result.failedFeeds} " + w.pick("Feeds", "Podcasts") + " nicht erreichbar"
             }
             messages.tryEmit(news + errors)
         }
@@ -440,7 +441,7 @@ fun ArticleListScreen(
                 if (searching) {
                     SearchBar(
                         text = search.orEmpty(),
-                        placeholder = if (scope == ListScope.All) "Alle Artikel durchsuchen" else "In „$title“ suchen",
+                        placeholder = if (scope == ListScope.All) features.pick("Alle Artikel durchsuchen", "Alle Folgen durchsuchen") else "In „$title“ suchen",
                         onChange = vm::setSearch,
                         onClose = vm::closeSearch,
                     )
@@ -449,7 +450,7 @@ fun ArticleListScreen(
                     scrollBehavior = scrollBehavior,
                     navigationIcon = {
                         IconButton(onClick = { coroutineScope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, contentDescription = "Feeds anzeigen")
+                            Icon(Icons.Default.Menu, contentDescription = features.pick("Feeds anzeigen", "Podcasts anzeigen"))
                         }
                     },
                     actions = {
@@ -458,7 +459,7 @@ fun ArticleListScreen(
                         }
                         if (scope != ListScope.Archive) {
                             IconButton(onClick = { confirmMarkAll = true }) {
-                                Icon(AppIcons.DoneAll, contentDescription = "Alle als gelesen markieren")
+                                Icon(AppIcons.DoneAll, contentDescription = features.pick("Alle als gelesen markieren", "Alle als erledigt markieren"))
                             }
                         }
                         IconButton(onClick = vm::refresh, enabled = !refreshing) {
@@ -475,7 +476,7 @@ fun ArticleListScreen(
                                 vm.setNewestFirst(false); menuOpen = false
                             }
                             HorizontalDivider()
-                            CheckMenuItem("Beim Scrollen als gelesen markieren", prefs.markReadOnScroll) {
+                            CheckMenuItem(features.pick("Beim Scrollen als gelesen markieren", "Beim Scrollen als erledigt markieren"), prefs.markReadOnScroll) {
                                 vm.setMarkReadOnScroll(!prefs.markReadOnScroll); menuOpen = false
                             }
                         }
@@ -507,14 +508,20 @@ fun ArticleListScreen(
                     items.isEmpty() -> EmptyState(
                         text = when {
                             hasQuery -> "Keine Treffer für „${search.orEmpty().trim()}“."
-                            feeds.isEmpty() -> "Noch keine Feeds abonniert."
-                            scope is ListScope.Starred -> "Noch keine Artikel gemerkt.\nTippe bei einem Artikel auf den Stern."
+                            feeds.isEmpty() -> features.pick("Noch keine Feeds abonniert.", "Noch keine Podcasts abonniert.")
+                            scope is ListScope.Starred -> features.pick(
+                                "Noch keine Artikel gemerkt.\nTippe bei einem Artikel auf den Stern.",
+                                "Noch keine Folgen gemerkt.\nTippe bei einer Folge auf den Stern.",
+                            )
                             scope is ListScope.Archive ->
-                                "Das Archiv ist leer.\nWische einen Artikel in der Liste nach links, um ihn zu archivieren."
-                            narrowed -> "Keine Artikel für diese Filter."
+                                features.pick(
+                                    "Das Archiv ist leer.\nWische einen Artikel in der Liste nach links, um ihn zu archivieren.",
+                                    "Das Archiv ist leer.\nWische eine Folge in der Liste nach links, um sie zu archivieren.",
+                                )
+                            narrowed -> features.pick("Keine Artikel für diese Filter.", "Keine Folgen für diese Filter.")
                             prefs.unreadOnly || prefs.hideReadAfterMinutes != ReadVisibility.NEVER ->
-                                "Keine ungelesenen Artikel."
-                            else -> "Keine Artikel. Zum Aktualisieren nach unten ziehen."
+                                features.pick("Keine ungelesenen Artikel.", "Keine offenen Folgen.")
+                            else -> features.pick("Keine Artikel.", "Keine Folgen.") + " Zum Aktualisieren nach unten ziehen."
                         },
                         action = if (feeds.isEmpty() && !hasQuery) features.addFeed to onOpenFeeds else null,
                     )
@@ -540,11 +547,16 @@ fun ArticleListScreen(
     if (confirmMarkAll) {
         AlertDialog(
             onDismissRequest = { confirmMarkAll = false },
-            title = { Text("Als gelesen markieren?") },
+            title = { Text(features.pick("Als gelesen markieren?", "Als erledigt markieren?")) },
             text = {
                 Text(
-                    if (narrowed) "Alle Artikel, die die Filter gerade anzeigen, werden als gelesen markiert."
-                    else "Alle Artikel in „$title“ werden als gelesen markiert.",
+                    if (narrowed) {
+                        features.pick("Alle Artikel", "Alle Folgen") + ", die die Filter gerade anzeigen, werden als " +
+                            features.pick("gelesen", "erledigt") + " markiert."
+                    } else {
+                        features.pick("Alle Artikel", "Alle Folgen") + " in „$title“ werden als " +
+                            features.pick("gelesen", "erledigt") + " markiert."
+                    },
                 )
             },
             confirmButton = {
@@ -573,7 +585,7 @@ private fun QuickFilters(
         FilterChip(
             selected = unreadOnly,
             onClick = { onUnreadOnly(!unreadOnly) },
-            label = { Text("Ungelesen") },
+            label = { Text(LocalContext.current.features.pick("Ungelesen", "Offen")) },
             leadingIcon = if (unreadOnly) checkIcon else null,
         )
         FilterChip(
@@ -730,6 +742,7 @@ private fun ArticleList(
     val now = remember(items) { System.currentTimeMillis() }
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
         items(items, key = { it.id }) { item ->
+            val words = LocalContext.current.features
             ArchiveSwipe(item, onArchive = { onToggleArchived(item) }, onEnqueue = { onEnqueue(item) }) {
                 ArticleRow(
                     item = item,
@@ -740,7 +753,11 @@ private fun ArticleList(
                         .combinedClickable(
                             onClick = { onOpen(item) },
                             onLongClick = { onToggleRead(item) },
-                            onLongClickLabel = if (item.read) "Als ungelesen markieren" else "Als gelesen markieren",
+                            onLongClickLabel = if (item.read) {
+                                words.pick("Als ungelesen markieren", "Als offen markieren")
+                            } else {
+                                words.pick("Als gelesen markieren", "Als erledigt markieren")
+                            },
                         )
                         .semantics {
                             customActions = listOf(

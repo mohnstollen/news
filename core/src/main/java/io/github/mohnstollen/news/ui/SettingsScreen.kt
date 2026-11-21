@@ -82,6 +82,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
+    val w = LocalContext.current.features
     val context = LocalContext.current
     val container = remember { context.container }
     val settings = container.settings
@@ -112,7 +113,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             SectionTitle("Aktualisierung")
             SwitchRow(
                 title = "Automatisch im Hintergrund aktualisieren",
-                subtitle = "Ausgeschaltet werden Feeds nur manuell geladen. Das spart Akku und Datenvolumen.",
+                subtitle = "Ausgeschaltet werden " + w.pick("Feeds", "Podcasts") + " nur manuell geladen. Das spart Akku und Datenvolumen.",
                 checked = prefs.autoUpdate,
                 onChange = { value -> updateSchedule { it.copy(autoUpdate = value) } },
             )
@@ -139,9 +140,10 @@ fun SettingsScreen(onBack: () -> Unit) {
                 onChange = { value -> settings.update { it.copy(notifyNewArticles = value) } },
             )
 
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            SectionTitle("Widget")
-            NumberField(
+            // Podfang has no widget.
+            if (!w.podcastWords) HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            if (!w.podcastWords) SectionTitle("Widget")
+            if (!w.podcastWords) NumberField(
                 label = "Widget-Intervall in Minuten",
                 value = prefs.widgetIntervalMinutes,
                 hint = "So oft lädt ein Widget auf dem Startbildschirm die Feeds und zeigt die neuesten " +
@@ -152,10 +154,13 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            SectionTitle("Lesen")
+            SectionTitle(w.pick("Lesen", "Liste"))
             SwitchRow(
-                title = "Beim Scrollen als gelesen markieren",
-                subtitle = "Artikel, an denen du in der Liste vorbeiscrollst, gelten als gelesen.",
+                title = w.pick("Beim Scrollen als gelesen markieren", "Beim Scrollen als erledigt markieren"),
+                subtitle = w.pick(
+                    "Artikel, an denen du in der Liste vorbeiscrollst, gelten als gelesen.",
+                    "Folgen, an denen du in der Liste vorbeiscrollst, gelten als erledigt.",
+                ),
                 checked = prefs.markReadOnScroll,
                 onChange = { value -> settings.update { it.copy(markReadOnScroll = value) } },
             )
@@ -164,10 +169,14 @@ fun SettingsScreen(onBack: () -> Unit) {
                 onChange = { value -> settings.update { it.copy(hideReadAfterMinutes = value) } },
             )
             NumberField(
-                label = "Gelesene Artikel löschen nach (Tagen)",
+                label = w.pick("Gelesene Artikel löschen nach (Tagen)", "Erledigte Folgen löschen nach (Tagen)"),
                 value = prefs.retentionDays,
-                hint = "0 = nie löschen. Gelöscht wird, sobald der Feed den Artikel nicht mehr führt. " +
-                    "Gemerkte Artikel und Artikel mit Notiz bleiben immer erhalten.",
+                hint = w.pick(
+                    "0 = nie löschen. Gelöscht wird, sobald der Feed den Artikel nicht mehr führt. " +
+                        "Gemerkte Artikel und Artikel mit Notiz bleiben immer erhalten.",
+                    "0 = nie löschen. Gelöscht wird, sobald der Podcast die Folge nicht mehr führt. " +
+                        "Gemerkte, heruntergeladene und Folgen mit Notiz bleiben immer erhalten.",
+                ),
                 isValid = { it >= 0 },
                 onValid = { value -> settings.update { it.copy(retentionDays = value) } },
             )
@@ -220,6 +229,7 @@ private val hideReadOptions = listOf(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HideReadField(minutes: Int, onChange: (Int) -> Unit) {
+    val w = LocalContext.current.features
     var expanded by remember { mutableStateOf(false) }
     val label = hideReadOptions.firstOrNull { it.first == minutes }?.second ?: "Nach $minutes Minuten"
     ExposedDropdownMenuBox(
@@ -231,11 +241,11 @@ private fun HideReadField(minutes: Int, onChange: (Int) -> Unit) {
             value = label,
             onValueChange = {},
             readOnly = true,
-            label = { Text("Gelesene Artikel ausblenden") },
+            label = { Text(w.pick("Gelesene Artikel ausblenden", "Erledigte Folgen ausblenden")) },
             supportingText = {
                 Text(
-                    "Gelesene Artikel verschwinden aus den Listen. Über die Suche und unter „Gemerkt“ " +
-                        "bleiben sie auffindbar.",
+                    w.pick("Gelesene Artikel", "Erledigte Folgen") + " verschwinden aus den Listen. Über die Suche " +
+                        "und unter „Gemerkt“ bleiben sie auffindbar.",
                 )
             },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
@@ -252,6 +262,7 @@ private fun HideReadField(minutes: Int, onChange: (Int) -> Unit) {
 /** The switch asks for the notification permission where Android requires one (13 and newer). */
 @Composable
 private fun NotificationRow(enabled: Boolean, autoUpdate: Boolean, onChange: (Boolean) -> Unit) {
+    val w = LocalContext.current.features
     val context = LocalContext.current
     var denied by remember { mutableStateOf(false) }
     // Re-read when the screen comes back, e.g. from the system settings.
@@ -266,12 +277,13 @@ private fun NotificationRow(enabled: Boolean, autoUpdate: Boolean, onChange: (Bo
         onChange(granted)
     }
     SwitchRow(
-        title = "Bei neuen Artikeln benachrichtigen",
+        title = w.pick("Bei neuen Artikeln benachrichtigen", "Bei neuen Folgen benachrichtigen"),
         subtitle = when {
             !autoUpdate -> "Benachrichtigt wird nur nach automatischen Updates im Hintergrund."
             enabled && !allowed || denied ->
                 "Android blockiert die Benachrichtigungen dieser App. Erlaube sie in den System-Einstellungen."
-            else -> "Nach einem Hintergrund-Update. Einzelne Feeds lassen sich in der Feed-Verwaltung ausnehmen."
+            else -> "Nach einem Hintergrund-Update. " +
+                w.pick("Einzelne Feeds lassen sich in der Feed-Verwaltung ausnehmen.", "Einzelne Podcasts lassen sich in der Podcast-Verwaltung ausnehmen.")
         },
         checked = enabled,
         enabled = autoUpdate,
@@ -376,8 +388,9 @@ private fun NextcloudSection(
     }
 
     Text(
-        "Gleicht abonnierte Feeds, gemerkte Artikel und Notizen über eine Datei in deiner Nextcloud ab. " +
-            "Der Gelesen-Status wird nicht synchronisiert.",
+        "Gleicht " + LocalContext.current.features.pick("abonnierte Feeds, gemerkte Artikel", "abonnierte Podcasts, gemerkte Folgen") +
+            " und Notizen über eine Datei in deiner Nextcloud ab. " +
+            LocalContext.current.features.pick("Der Gelesen-Status", "Was erledigt oder gehört ist,") + " wird nicht synchronisiert.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
@@ -546,7 +559,7 @@ private fun PodcastSection(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit) {
         if (count > 0 || active.isNotEmpty()) TextButton(onClick = { confirmDelete = true }) { Text("Alle löschen") }
     }
     Text(
-        "Automatische Downloads schaltest du pro Feed ein: Feeds verwalten, Feed antippen.",
+        "Automatische Downloads schaltest du pro Podcast ein: Podcasts verwalten, Podcast antippen.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),

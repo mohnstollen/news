@@ -13,7 +13,14 @@ data class AppFeatures(
     val allItems: String,
     val manageFeeds: String,
     val addFeed: String,
+    /** Podcast words ("Folge", "Podcast", "erledigt") instead of reader words ("Artikel", "Feed", "gelesen"). */
+    val podcastWords: Boolean = false,
+    /** Loading the full article from the linked web page; usual for news, not for podcasts. */
+    val fullText: Boolean = true,
 ) {
+    /** The app's word for something: [news] in News, [podcast] in Podfang. */
+    fun pick(news: String, podcast: String): String = if (podcastWords) podcast else news
+
     /** Name the app gives itself towards Nextcloud, e.g. for the app password. */
     val clientName: String get() = "$appName (Android)"
 
@@ -34,6 +41,8 @@ data class AppFeatures(
             allItems = "Alle Folgen",
             manageFeeds = "Podcasts verwalten",
             addFeed = "Podcast hinzufügen",
+            podcastWords = true,
+            fullText = false,
         )
     }
 }
