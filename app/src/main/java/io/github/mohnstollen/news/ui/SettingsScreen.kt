@@ -7,6 +7,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.layout.Arrangement
+import io.github.mohnstollen.news.playback.Episodes
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.TextButton
@@ -520,11 +521,12 @@ private fun PodcastSection(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit) {
         onChange = { value -> onChange { it.copy(downloadWifiOnly = value) } },
     )
     SwitchRow(
-        title = "Gehörte Folgen löschen",
+        title = "Downloads nach dem Hören löschen",
         subtitle = "Die Datei einer Folge wird gelöscht, sobald sie zu Ende gehört oder als gehört markiert ist.",
         checked = prefs.deletePlayedDownloads,
         onChange = { value -> onChange { it.copy(deletePlayedDownloads = value) } },
     )
+    EndBufferRow(seconds = prefs.endBufferSeconds, onChange = { value -> onChange { it.copy(endBufferSeconds = value) } })
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
@@ -564,6 +566,34 @@ private fun PodcastSection(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit) {
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Abbrechen") } },
         )
+    }
+}
+
+/** How much of the end counts as outro: then the episode counts as played and the rest is skipped. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun EndBufferRow(seconds: Int, onChange: (Int) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Text("Abspann überspringen")
+        Text(
+            if (seconds == 0) {
+                "Folgen laufen bis zur letzten Sekunde."
+            } else {
+                "Bleiben nur noch $seconds Sekunden, gilt die Folge als gehört: Der Rest wird übersprungen, " +
+                    "der Download gelöscht (wenn oben eingeschaltet) und die nächste Folge der Warteschlange startet."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Episodes.END_BUFFER_CHOICES.forEach { choice ->
+                androidx.compose.material3.FilterChip(
+                    selected = seconds == choice,
+                    onClick = { onChange(choice) },
+                    label = { Text(if (choice == 0) "Aus" else "$choice s") },
+                )
+            }
+        }
     }
 }
 

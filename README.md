@@ -30,7 +30,8 @@ RSS-/Atom-Reader für Android (ab Android 8.0), geschrieben in Kotlin mit Jetpac
   und Bluetooth. Jede Folge merkt sich, wo sie aufgehört hat; zu Ende gehörte Folgen gelten als gelesen
 - **Downloads**: Folgen pro Stück herunterladen (Knopf im Artikel) oder pro Feed automatisch nach jedem
   Update, einstellbar schon beim Abonnieren oder später unter Feeds verwalten → Feed antippen. Standardmäßig nur im WLAN; unterbrochene Downloads laufen
-  weiter, wo sie aufgehört haben. Gehörte Folgen werden auf Wunsch gelöscht; Belegung und „Alle löschen“
+  weiter, wo sie aufgehört haben. Gehörte Folgen werden auf Wunsch gelöscht, auf Wunsch schon kurz vor
+  dem Ende („Abspann überspringen“: die letzten 10 bis 120 Sekunden zählen als gehört); Belegung und „Alle löschen“
   unter Einstellungen → Podcasts
 - **Warteschlange**: Folgen im Artikel einreihen oder in der Liste nach rechts wischen; sie laufen
   nacheinander, wenn eine Folge zu Ende ist. Reihenfolge ändern und entfernen unter „Warteschlange“ im Menü

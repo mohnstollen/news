@@ -111,10 +111,10 @@ class PlaybackServiceTest {
         service.onDestroy()
     }
 
-    /** Half a second of silence as a WAV file, which the player can play without a decoder. */
-    private fun silence(name: String): java.io.File {
-        val rate = 8000
-        val samples = rate / 2
+    /** Silence as a WAV file (half a second by default), which the player can play without a decoder. */
+    private fun silence(name: String, seconds: Double = 0.5): java.io.File {
+        val rate = 4000
+        val samples = (rate * seconds).toInt()
         val data = ByteArray(samples * 2)
         val header = java.nio.ByteBuffer.allocate(44).order(java.nio.ByteOrder.LITTLE_ENDIAN).apply {
             put("RIFF".toByteArray()); putInt(36 + data.size); put("WAVE".toByteArray())
@@ -172,6 +172,55 @@ class PlaybackServiceTest {
         assertEquals(second.toString(), player.currentMediaItem?.mediaId)
         assertNull(context.container.sleepTimer.mode.value)
         runBlocking { assertEquals("still queued", listOf(first), repo.queueDao.ids()) }
+        controller.release()
+        service.onDestroy()
+    }
+
+    @Test
+    fun theEndBufferSkipsTheOutroDeletesTheDownloadAndGoesOn() {
+        val (first, second, file) = runBlocking {
+            val feedId = repo.feedDao.insert(Feed(url = "https://example.org/feed", title = "Der Podcast"))
+            val long = silence("long.wav", seconds = 100.0)
+            fun episode(guid: String, path: String) = Article(
+                feedId = feedId, guid = guid, title = "Folge $guid", pubDate = 0, fetchedAt = 0,
+                enclosureUrl = "https://cdn.example.org/$guid.wav", enclosureType = "audio/wav", downloadPath = path,
+            )
+            val ids = repo.articleDao.insertAll(listOf(episode("a", long.path), episode("b", silence("b.wav").path)))
+            repo.enqueue(ids[1])
+            Triple(ids[0], ids[1], long)
+        }
+        context.container.settings.update { it.copy(endBufferSeconds = 30, deletePlayedDownloads = true) }
+        val service = Robolectric.buildService(PlaybackService::class.java).create().get()
+        val session = service.sessions.single()
+        val player = session.player
+        val future = MediaController.Builder(context, session.token).buildAsync()
+        waitFor("controller") { future.isDone }
+        val controller = future.get()
+
+        controller.setMediaItem(MediaItem.Builder().setMediaId(first.toString()).build())
+        controller.prepare()
+        waitFor("prepared") { player.duration > 0 }
+        assertEquals(100_000L, player.duration)
+
+        // 40 seconds left: more than the buffer, nothing happens.
+        controller.seekTo(60_000)
+        controller.play()
+        repeat(10) { shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(100)) }
+        assertEquals(first.toString(), player.currentMediaItem?.mediaId)
+        assertEquals(0L, runBlocking { repo.articleDao.byId(first)!!.playedAt })
+
+        // 25 seconds left: inside the 30-second buffer.
+        controller.seekTo(75_000)
+        waitFor("next episode") {
+            shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(100))
+            player.currentMediaItem?.mediaId == second.toString()
+        }
+        runBlocking {
+            val a = repo.articleDao.byId(first)!!
+            assertTrue("counts as played", a.playedAt > 0)
+            assertEquals(0L, a.playPosition)
+        }
+        waitFor("download deleted") { !file.exists() && runBlocking { repo.articleDao.byId(first)!!.downloadPath } == null }
         controller.release()
         service.onDestroy()
     }

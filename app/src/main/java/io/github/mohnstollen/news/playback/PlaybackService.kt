@@ -45,6 +45,7 @@ class PlaybackService : MediaSessionService() {
     private val main = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var saveJob: Job? = null
     private var sleepJob: Job? = null
+    private var endBufferJob: Job? = null
 
     /** Listening time not yet written to the log: since when, and for which episode. */
     private var listeningSince = 0L
@@ -125,7 +126,7 @@ class PlaybackService : MediaSessionService() {
 
     /** Loads an episode from the queue and plays it from where it was left. */
     private suspend fun playFromQueue(articleId: Long) {
-        val (item, start) = Episodes.resolve(articleId.toString(), repo.articleDao, repo.feedDao) ?: return
+        val (item, start) = Episodes.resolve(articleId.toString(), repo.articleDao, repo.feedDao, endBufferMs()) ?: return
         val player = session?.player ?: return
         player.setMediaItem(item, start)
         player.prepare()
@@ -170,7 +171,7 @@ class PlaybackService : MediaSessionService() {
             return main.future {
                 val wanted = mediaItems.getOrNull(startIndex.coerceAtLeast(0))
                     ?: throw IllegalArgumentException("Keine Folge angegeben")
-                val (item, savedPosition) = Episodes.resolve(wanted.mediaId, repo.articleDao, repo.feedDao)
+                val (item, savedPosition) = Episodes.resolve(wanted.mediaId, repo.articleDao, repo.feedDao, endBufferMs())
                     ?: throw IllegalArgumentException("Folge ${wanted.mediaId} hat keine Audiodatei")
                 val start = if (startPositionMs == C.TIME_UNSET) savedPosition else startPositionMs
                 // Playing an episode takes it out of the queue.
@@ -192,7 +193,9 @@ class PlaybackService : MediaSessionService() {
     private val listener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             saveJob?.cancel()
+            endBufferJob?.cancel()
             if (isPlaying) {
+                endBufferJob = main.launch { watchEndBuffer() }
                 listeningSince = SystemClock.elapsedRealtime()
                 listeningId = currentArticleId()
                 saveJob = main.launch {
@@ -240,6 +243,26 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    private fun endBufferMs(): Long = container.settings.current.endBufferSeconds * 1000L
+
+    /**
+     * While playing: once only the end buffer is left, jump to the end. Reaching the end does the
+     * rest as usual (played, download deleted, next in the queue).
+     */
+    private suspend fun watchEndBuffer() {
+        while (true) {
+            val player = session?.player ?: return
+            val buffer = endBufferMs()
+            if (buffer > 0 && player.duration != C.TIME_UNSET &&
+                Episodes.inEndBuffer(player.currentPosition, player.duration, buffer)
+            ) {
+                player.seekTo(player.duration)
+                return
+            }
+            delay(END_BUFFER_CHECK_MS)
+        }
+    }
+
     /** Writes the listening time since the last call to the statistics. */
     private fun logListening() {
         val id = listeningId ?: return
@@ -277,5 +300,6 @@ class PlaybackService : MediaSessionService() {
         const val SEEK_FORWARD_MS = 30_000L
         /** While playing, the position is stored this often, so little is lost if the app is killed. */
         private const val SAVE_INTERVAL_MS = 10_000L
+        private const val END_BUFFER_CHECK_MS = 500L
     }
 }

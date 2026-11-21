@@ -13,6 +13,8 @@ import io.github.mohnstollen.news.playback.Episodes
 import io.github.mohnstollen.news.ui.speedLabel
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -65,6 +67,20 @@ class EpisodesTest {
         assertEquals("unknown length: resume anyway", 600_000L, Episodes.startPosition(episode.copy(playPosition = 600_000, durationSeconds = null)))
         assertEquals("a few seconds before the end", 0L, Episodes.startPosition(episode.copy(playPosition = 1_795_000)))
         assertEquals("played to the end", 0L, Episodes.startPosition(episode.copy(playPosition = 600_000, playedAt = 1)))
+        // With a 60-second end buffer, a position in the outro starts over.
+        assertEquals(0L, Episodes.startPosition(episode.copy(playPosition = 1_750_000), endBufferMs = 60_000))
+        assertEquals(1_700_000L, Episodes.startPosition(episode.copy(playPosition = 1_700_000), endBufferMs = 60_000))
+    }
+
+    @Test
+    fun endBuffer() {
+        val hour = 3_600_000L
+        assertFalse("off", Episodes.inEndBuffer(hour - 1_000, hour, 0))
+        assertTrue(Episodes.inEndBuffer(hour - 30_000, hour, 30_000))
+        assertTrue(Episodes.inEndBuffer(hour - 1, hour, 30_000))
+        assertFalse(Episodes.inEndBuffer(hour - 31_000, hour, 30_000))
+        assertFalse("at the end it is over anyway", Episodes.inEndBuffer(hour, hour, 30_000))
+        assertFalse("short clips play to the end", Episodes.inEndBuffer(70_000, 80_000, 30_000))
     }
 
     @Test

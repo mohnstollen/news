@@ -45,6 +45,8 @@ data class Prefs(
     val downloadWifiOnly: Boolean = true,
     /** Delete an episode's file once it was played to the end. */
     val deletePlayedDownloads: Boolean = true,
+    /** Seconds before the end at which an episode counts as played and the rest is skipped; 0 = off. */
+    val endBufferSeconds: Int = 0,
 ) {
     val syncConfigured: Boolean get() = ncServer.isNotBlank() && ncUser.isNotBlank()
 }
@@ -82,6 +84,7 @@ class SettingsStore(context: Context) {
             playbackSpeed = sp.getFloat("playbackSpeed", d.playbackSpeed),
             downloadWifiOnly = sp.getBoolean("downloadWifiOnly", d.downloadWifiOnly),
             deletePlayedDownloads = sp.getBoolean("deletePlayedDownloads", d.deletePlayedDownloads),
+            endBufferSeconds = sp.getInt("endBufferSeconds", d.endBufferSeconds),
         )
     }
 
@@ -110,6 +113,7 @@ class SettingsStore(context: Context) {
             .putFloat("playbackSpeed", p.playbackSpeed)
             .putBoolean("downloadWifiOnly", p.downloadWifiOnly)
             .putBoolean("deletePlayedDownloads", p.deletePlayedDownloads)
+            .putInt("endBufferSeconds", p.endBufferSeconds)
             .apply()
         _flow.value = p
     }

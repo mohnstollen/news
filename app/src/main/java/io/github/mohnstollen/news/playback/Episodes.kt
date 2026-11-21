@@ -15,6 +15,12 @@ object Episodes {
     /** Closer to the end than this, an episode starts over instead of resuming. */
     private const val RESUME_END_MARGIN_MS = 10_000L
 
+    /** Shorter episodes play to the end whatever the buffer, so a buffer cannot swallow them. */
+    private const val MIN_LENGTH_FOR_BUFFER_MS = 60_000L
+
+    /** Choices for the end buffer in seconds; 0 is off. */
+    val END_BUFFER_CHOICES = listOf(0, 10, 30, 60, 120)
+
     /** The player's item for [article]; null if it has no media file. The media id is the article id. */
     fun mediaItem(article: Article, feed: Feed?): MediaItem? {
         val local = article.downloadPath?.let(::File)?.takeIf { it.isFile }
@@ -38,19 +44,35 @@ object Episodes {
             .build()
     }
 
-    /** Where to start: the saved position, unless the episode was finished or nearly so. */
-    fun startPosition(article: Article): Long {
+    /**
+     * Where to start: the saved position, unless the episode was finished or nearly so; with an
+     * end buffer ([endBufferMs]), a position in the outro starts over too.
+     */
+    fun startPosition(article: Article, endBufferMs: Long = 0): Long {
         val position = article.playPosition
         if (position <= 0 || article.playedAt > 0) return 0
         val durationMs = article.durationSeconds?.times(1000) ?: return position
-        return if (position < durationMs - RESUME_END_MARGIN_MS) position else 0
+        return if (position < durationMs - maxOf(RESUME_END_MARGIN_MS, endBufferMs)) position else 0
     }
 
+    /**
+     * Whether playback reached the end buffer, so the rest (usually the outro) can be skipped and
+     * the episode counts as played. Only for episodes clearly longer than the buffer.
+     */
+    fun inEndBuffer(positionMs: Long, durationMs: Long, endBufferMs: Long): Boolean =
+        endBufferMs > 0 && durationMs > endBufferMs + MIN_LENGTH_FOR_BUFFER_MS &&
+            positionMs >= durationMs - endBufferMs && positionMs < durationMs
+
     /** Loads the episode for a media id sent by a controller; null if there is none. */
-    suspend fun resolve(mediaId: String, articles: ArticleDao, feeds: FeedDao): Pair<MediaItem, Long>? {
+    suspend fun resolve(
+        mediaId: String,
+        articles: ArticleDao,
+        feeds: FeedDao,
+        endBufferMs: Long = 0,
+    ): Pair<MediaItem, Long>? {
         val article = mediaId.toLongOrNull()?.let { articles.byId(it) } ?: return null
         val item = mediaItem(article, feeds.byId(article.feedId)) ?: return null
-        return item to startPosition(article)
+        return item to startPosition(article, endBufferMs)
     }
 
     /** Short status for lists: "45 Min", "noch 12 Min", "Gehört"; null if nothing is known. */
