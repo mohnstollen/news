@@ -70,7 +70,9 @@ sie nicht brauchen.
   und nächstes Kapitel
 - **Wiedergabe** im Hintergrund mit Mini-Player, Player mit Positionsregler und Geschwindigkeit
   (0,8× bis 2×, auch direkt in der Folge umschaltbar), 10 s zurück / 30 s vor, Steuerung über
-  Benachrichtigung, Sperrbildschirm, Kopfhörer und Bluetooth. Jede Folge merkt sich, wo sie aufgehört
+  Benachrichtigung, Sperrbildschirm, Kopfhörer und Bluetooth. Auf dem Sperrbildschirm und in der
+  Benachrichtigung: vorherige/nächste Folge (aus der Warteschlange), 10 s zurück und 30 s vor; welches
+  Paar neben Play liegt, ist einstellbar (manche Handys zeigen dort nur zwei Knöpfe) Jede Folge merkt sich, wo sie aufgehört
   hat; zu Ende gehörte Folgen gelten als gelesen
 - **Downloads**: Folgen pro Stück herunterladen (Knopf in der Folge) oder pro Podcast automatisch nach
   jedem Update, einstellbar schon beim Abonnieren oder später unter Podcasts verwalten → Podcast

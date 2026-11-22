@@ -51,6 +51,8 @@ data class Prefs(
     val downloadEnqueues: Boolean = true,
     /** An episode put into the queue is downloaded (on Wi-Fi if [downloadWifiOnly]). */
     val queueDownloads: Boolean = true,
+    /** Next to play/pause on the lock screen: back 10 s / forward 30 s instead of previous/next episode. */
+    val lockScreenSeek: Boolean = false,
 ) {
     val syncConfigured: Boolean get() = ncServer.isNotBlank() && ncUser.isNotBlank()
 }
@@ -95,6 +97,7 @@ class SettingsStore(context: Context, private val defaults: Prefs = Prefs()) {
             endBufferSeconds = sp.getInt("endBufferSeconds", d.endBufferSeconds),
             downloadEnqueues = sp.getBoolean("downloadEnqueues", d.downloadEnqueues),
             queueDownloads = sp.getBoolean("queueDownloads", d.queueDownloads),
+            lockScreenSeek = sp.getBoolean("lockScreenSeek", d.lockScreenSeek),
         )
     }
 
@@ -126,6 +129,7 @@ class SettingsStore(context: Context, private val defaults: Prefs = Prefs()) {
             .putInt("endBufferSeconds", p.endBufferSeconds)
             .putBoolean("downloadEnqueues", p.downloadEnqueues)
             .putBoolean("queueDownloads", p.queueDownloads)
+            .putBoolean("lockScreenSeek", p.lockScreenSeek)
             .apply()
         _flow.value = p
     }

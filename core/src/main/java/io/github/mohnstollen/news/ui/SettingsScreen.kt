@@ -556,6 +556,7 @@ private fun PodcastSection(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, o
         onChange = { value -> onChange { it.copy(deletePlayedDownloads = value) } },
     )
     EndBufferRow(seconds = prefs.endBufferSeconds, onChange = { value -> onChange { it.copy(endBufferSeconds = value) } })
+    LockScreenRow(seek = prefs.lockScreenSeek, onChange = { value -> onChange { it.copy(lockScreenSeek = value) } })
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
@@ -598,6 +599,33 @@ private fun PodcastSection(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, o
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Abbrechen") } },
         )
+    }
+}
+
+/** Which pair of buttons sits next to play/pause on the lock screen; the other pair follows. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun LockScreenRow(seek: Boolean, onChange: (Boolean) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Text("Sperrbildschirm: neben Play")
+        Text(
+            "Daneben, wo das Handy Platz hat, die anderen Knöpfe. Manche Handys zeigen auf dem " +
+                "Sperrbildschirm nur zwei; dann zum Werbung-Überspringen „10 s / 30 s“ wählen.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            androidx.compose.material3.FilterChip(
+                selected = !seek,
+                onClick = { onChange(false) },
+                label = { Text("Folge zurück / vor") },
+            )
+            androidx.compose.material3.FilterChip(
+                selected = seek,
+                onClick = { onChange(true) },
+                label = { Text("10 s zurück / 30 s vor") },
+            )
+        }
     }
 }
 
