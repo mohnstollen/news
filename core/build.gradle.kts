@@ -8,6 +8,18 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+/**
+ * The Android runtimes Robolectric runs the tests on: SDK 34 (most tests) and 35 (the default).
+ * One configuration each, or Gradle would treat them as two versions of one library and keep one.
+ */
+val robolectricSdk34: Configuration by configurations.creating { isTransitive = false }
+val robolectricSdk35: Configuration by configurations.creating { isTransitive = false }
+val robolectricJarsDir = layout.buildDirectory.dir("robolectric-jars")
+val robolectricJars = tasks.register<Sync>("robolectricJars") {
+    from(robolectricSdk34, robolectricSdk35)
+    into(robolectricJarsDir)
+}
+
 android {
     namespace = "io.github.mohnstollen.news"
     compileSdk = 35
@@ -28,8 +40,15 @@ android {
     testOptions {
         targetSdk = 35
         unitTests.isIncludeAndroidResources = true
-        // The Compose UI tests need a JVM each.
-        unitTests.all { it.setForkEvery(1) }
+        unitTests.all {
+            // The Compose UI tests need a JVM each.
+            it.setForkEvery(1)
+            // Robolectric's Android runtime comes from Gradle (cached, with retries) instead of being
+            // downloaded by Robolectric itself at test time, which fails when Maven Central refuses it.
+            it.dependsOn(robolectricJars)
+            it.systemProperty("robolectric.offline", "true")
+            it.systemProperty("robolectric.dependency.dir", robolectricJarsDir.get().asFile.absolutePath)
+        }
     }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -81,6 +100,9 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jsoup:jsoup:1.18.3")
     implementation("net.dankito.readability4j:readability4j:1.0.8")
+
+    robolectricSdk34("org.robolectric:android-all-instrumented:14-robolectric-10818077-i7")
+    robolectricSdk35("org.robolectric:android-all-instrumented:15-robolectric-12650502-i7")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")
