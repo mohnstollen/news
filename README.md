@@ -48,6 +48,13 @@ sie nicht brauchen.
 
 ## Nur News
 
+- **Android Auto**: Warteschlange, Neu und Podcasts (als Cover-Raster) zum Durchblättern, mit Cover,
+  Restzeit und Hörfortschritt; Abspielen wie in der App (gespeicherte Stelle, oben in die Warteschlange),
+  nächste/vorherige Folge, 10 s zurück und 30 s vor. Sprachbefehle („Spiele Lage der Nation auf
+  Podfang“) finden den Podcast (neueste ungehörte Folge) oder eine Folge nach ihrem Titel; ohne
+  Treffer geht die Warteschlange weiter. Play ohne geladene Folge macht dort weiter, wo die
+  Warteschlange steht. Ohne Play Store muss in Android Auto unter Entwicklereinstellungen
+  „Unbekannte Quellen“ an sein
 - **Widget** für den Startbildschirm mit den neuesten ungelesenen Artikeln aller Feeds, eines
   Ordners oder eines einzelnen Feeds (pro Widget wählbar, auch mehrere nebeneinander) und mit
   eigenem, einstellbarem Aktualisierungsintervall
@@ -74,6 +81,13 @@ sie nicht brauchen.
   Benachrichtigung: vorherige/nächste Folge (aus der Warteschlange), 10 s zurück und 30 s vor; welches
   Paar neben Play liegt, ist einstellbar (manche Handys zeigen dort nur zwei Knöpfe). Jede Folge merkt
   sich, wo sie aufgehört hat; zu Ende gehörte Folgen gelten als gelesen
+- **Android Auto**: Warteschlange, Neu und Podcasts (als Cover-Raster) zum Durchblättern, mit Cover,
+  Restzeit und Hörfortschritt; Abspielen wie in der App (gespeicherte Stelle, oben in die Warteschlange),
+  nächste/vorherige Folge, 10 s zurück und 30 s vor. Sprachbefehle („Spiele Lage der Nation auf
+  Podfang“) finden den Podcast (neueste ungehörte Folge) oder eine Folge nach ihrem Titel; ohne
+  Treffer geht die Warteschlange weiter. Play ohne geladene Folge macht dort weiter, wo die
+  Warteschlange steht. Ohne Play Store muss in Android Auto unter Entwicklereinstellungen
+  „Unbekannte Quellen“ an sein
 - **Widget** für den Startbildschirm, ein Widget für alle Größen: ab 2×1 Cover, Folge und Play/Pause,
   ab 4×1 zusätzlich 10 s zurück, 30 s vor und nächste Folge, ab 4×2 die nächsten drei Folgen der
   Warteschlange. Zeigt die laufende Folge mit verbleibender Zeit (läuft beim Abspielen mit) oder, wenn
@@ -156,7 +170,7 @@ Pfade relativ zu `core/src/main/java/io/github/mohnstollen/news/`.
 | `data/Database.kt` | Room-Datenbank: Feeds, Artikel, Warteschlange, Hör-Protokoll, Löschmarker, Suchindex |
 | `data/Chapters.kt` | Kapitel aus Feed, Kapiteldatei und ID3 |
 | `data/Recommendations.kt` | Podcast-Suche und Vorschläge über den Katalog von Apple |
-| `playback/` | Wiedergabedienst, Downloads, Sleep-Timer (nur Podfang) |
+| `playback/` | Wiedergabedienst, Android-Auto-Mediathek und Cover, Downloads, Sleep-Timer (nur Podfang) |
 | `data/FeedParser.kt` | RSS 2.0, RSS 1.0 (RDF) und Atom, Datumsformate |
 | `data/Network.kt` | Abruf, Feed-Suche auf Webseiten, Volltext-Extraktion |
 | `data/Opml.kt` | OPML lesen und schreiben |

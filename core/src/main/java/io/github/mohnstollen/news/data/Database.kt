@@ -453,6 +453,44 @@ interface ArticleDao {
     @Query("SELECT EXISTS(SELECT 1 FROM articles WHERE feedId = :feedId AND enclosureUrl IS NOT NULL)")
     suspend fun hasEpisodes(feedId: Long): Boolean
 
+    /** The inbox ("Neu") for the car: episodes neither played, archived nor queued; newest first. */
+    @Query(
+        "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
+            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt, " +
+            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived, " +
+            "a.imageUrl, f.imageUrl AS feedImageUrl " +
+            "FROM articles a JOIN feeds f ON f.id = a.feedId " +
+            "WHERE a.enclosureUrl IS NOT NULL AND a.playedAt = 0 AND a.read = 0 AND a.archivedAt = 0 " +
+            "AND a.id NOT IN (SELECT articleId FROM queue) ORDER BY a.pubDate DESC, a.id DESC LIMIT :limit",
+    )
+    suspend fun inbox(limit: Int): List<ArticleListItem>
+
+    /** Episodes of one podcast, newest first; archived ones too, but not those without a file. */
+    @Query(
+        "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
+            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt, " +
+            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived, " +
+            "a.imageUrl, f.imageUrl AS feedImageUrl " +
+            "FROM articles a JOIN feeds f ON f.id = a.feedId " +
+            "WHERE a.feedId = :feedId AND a.enclosureUrl IS NOT NULL ORDER BY a.pubDate DESC, a.id DESC LIMIT :limit",
+    )
+    suspend fun episodes(feedId: Long, limit: Int): List<ArticleListItem>
+
+    /** Episodes whose title contains [text] (ignoring case), newest first; for voice requests. */
+    @Query(
+        "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
+            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt, " +
+            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived, " +
+            "a.imageUrl, f.imageUrl AS feedImageUrl " +
+            "FROM articles a JOIN feeds f ON f.id = a.feedId " +
+            "WHERE a.enclosureUrl IS NOT NULL AND a.title LIKE '%' || :text || '%' " +
+            "ORDER BY a.pubDate DESC, a.id DESC LIMIT :limit",
+    )
+    suspend fun episodesTitled(text: String, limit: Int): List<ArticleListItem>
+
     @Query("SELECT title FROM articles WHERE feedId = :feedId ORDER BY pubDate DESC LIMIT :limit")
     suspend fun recentTitles(feedId: Long, limit: Int): List<String>
 

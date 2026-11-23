@@ -23,8 +23,8 @@ object LockScreenControls {
     val PREVIOUS_EPISODE = SessionCommand("podfang.PREVIOUS_EPISODE", Bundle.EMPTY)
     val NEXT_EPISODE = SessionCommand("podfang.NEXT_EPISODE", Bundle.EMPTY)
 
-    /** Our own commands come on top of the usual ones, for every controller. */
-    val sessionCommands: SessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+    /** Our own commands come on top of the usual ones (browsing the library included), for every controller. */
+    val sessionCommands: SessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
         .add(SEEK_BACK).add(SEEK_FORWARD).add(PREVIOUS_EPISODE).add(NEXT_EPISODE)
         .build()
 
