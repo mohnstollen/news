@@ -203,11 +203,13 @@ class PlaybackServiceTest {
         // The feed did not say how long it is; the player found out.
         waitFor("length learned") { runBlocking { repo.articleDao.byId(first)!!.durationSeconds } == 100L }
 
-        // Far from the end: playing a moment changes nothing. (Robolectric plays faster than real
-        // time, so this keeps a wide margin; Episodes.inEndBuffer has the exact limits.)
+        // Far from the end: starting to play changes nothing; the end buffer watcher looks once at
+        // once. The test clock stays put here: with it moving, the test's audio output takes data
+        // as fast as it comes, and a fast machine "plays" a minute in a few steps, into the buffer.
+        // (Episodes.inEndBuffer has the exact limits.)
         controller.seekTo(10_000)
         controller.play()
-        repeat(2) { shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(100)) }
+        waitFor("playing") { player.isPlaying }
         controller.pause()
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(first.toString(), player.currentMediaItem?.mediaId)
