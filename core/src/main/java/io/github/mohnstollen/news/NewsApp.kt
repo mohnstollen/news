@@ -7,6 +7,7 @@ import androidx.room.Room
 import io.github.mohnstollen.news.data.AppDatabase
 import io.github.mohnstollen.news.data.FeedFetcher
 import io.github.mohnstollen.news.data.FullTextExtractor
+import io.github.mohnstollen.news.data.GpodderSync
 import io.github.mohnstollen.news.data.NcLoginFlow
 import io.github.mohnstollen.news.data.Prefs
 import io.github.mohnstollen.news.data.Recommender
@@ -30,7 +31,7 @@ class AppContainer(app: Application, val features: AppFeatures) {
         .build()
     val settings = SettingsStore(app, Prefs(ncFolder = features.syncFolder))
     val repository = Repository(db, FeedFetcher(http), FullTextExtractor(http), settings)
-    val sync = SyncManager(http, settings, repository)
+    val sync = SyncManager(http, settings, repository, GpodderSync(app, repository).takeIf { features.podcasts })
     val loginFlow = NcLoginFlow(http, settings, sync, repository, clientName = features.clientName)
     val downloads = Downloads(app, repository, settings)
     val sleepTimer = SleepTimer()

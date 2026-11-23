@@ -14,6 +14,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.RoomDatabase
+import androidx.room.Transaction
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
@@ -120,6 +121,68 @@ data class QueueEntry(
     @PrimaryKey val articleId: Long,
     val position: Long,
 )
+
+/**
+ * Where an episode was heard, not yet sent to gPodder Sync: one row per episode, the latest
+ * change. [startedMs] is where that listening began.
+ */
+@Entity(
+    tableName = "play_actions",
+    foreignKeys = [
+        ForeignKey(entity = Article::class, parentColumns = ["id"], childColumns = ["articleId"], onDelete = ForeignKey.CASCADE),
+    ],
+)
+data class PlayAction(
+    @PrimaryKey val articleId: Long,
+    val startedMs: Long,
+    val positionMs: Long,
+    /** When it happened, ms since 1970. */
+    val at: Long,
+)
+
+/** A [PlayAction] with what gPodder Sync needs to know the episode. */
+data class PlayActionRow(
+    val articleId: Long,
+    val startedMs: Long,
+    val positionMs: Long,
+    val at: Long,
+    val feedUrl: String,
+    val guid: String,
+    val enclosureUrl: String?,
+    val durationSeconds: Long?,
+)
+
+@Dao
+interface PlayActionDao {
+    @Query("INSERT OR IGNORE INTO play_actions (articleId, startedMs, positionMs, at) VALUES (:articleId, :positionMs, :positionMs, :at)")
+    suspend fun insertIfNew(articleId: Long, positionMs: Long, at: Long)
+
+    @Query("UPDATE play_actions SET positionMs = :positionMs, at = :at WHERE articleId = :articleId")
+    suspend fun update(articleId: Long, positionMs: Long, at: Long)
+
+    /** Records a change; where the listening began stays as it was. (No UPSERT: Android 8 lacks it.) */
+    @Transaction
+    suspend fun record(articleId: Long, positionMs: Long, at: Long) {
+        insertIfNew(articleId, positionMs, at)
+        update(articleId, positionMs, at)
+    }
+
+    @Query(
+        "SELECT p.articleId, p.startedMs, p.positionMs, p.at, f.url AS feedUrl, a.guid, a.enclosureUrl, a.durationSeconds " +
+            "FROM play_actions p JOIN articles a ON a.id = p.articleId JOIN feeds f ON f.id = a.feedId",
+    )
+    suspend fun pending(): List<PlayActionRow>
+
+    @Query("SELECT * FROM play_actions WHERE articleId = :articleId")
+    suspend fun byArticle(articleId: Long): PlayAction?
+
+    /** Sent: gone, unless it changed meanwhile. */
+    @Query("DELETE FROM play_actions WHERE articleId = :articleId AND at = :at")
+    suspend fun sent(articleId: Long, at: Long)
+
+    @Query("DELETE FROM play_actions")
+    suspend fun clear()
+}
 
 data class QueueItem(
     val id: Long,
@@ -506,6 +569,9 @@ interface ArticleDao {
     @Query("SELECT * FROM articles WHERE id = :id")
     suspend fun byId(id: Long): Article?
 
+    @Query("SELECT * FROM articles WHERE feedId = :feedId AND enclosureUrl = :url LIMIT 1")
+    suspend fun byEnclosure(feedId: Long, url: String): Article?
+
     @Query("SELECT * FROM articles WHERE feedId = :feedId AND guid = :guid")
     suspend fun byGuid(feedId: Long, guid: String): Article?
 
@@ -618,8 +684,9 @@ interface ArticleDao {
 @Database(
     entities = [
         Feed::class, Article::class, DeletedFeed::class, ArticleFts::class, QueueEntry::class, ListenEntry::class,
+        PlayAction::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -627,6 +694,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun articleDao(): ArticleDao
     abstract fun queueDao(): QueueDao
     abstract fun listenDao(): ListenDao
+    abstract fun playActionDao(): PlayActionDao
 
     companion object {
         /** Adds the per-feed notification switch and the search index. */
@@ -696,7 +764,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+        /** Listening positions waiting for gPodder Sync. */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `play_actions` (`articleId` INTEGER NOT NULL, `startedMs` INTEGER NOT NULL, " +
+                        "`positionMs` INTEGER NOT NULL, `at` INTEGER NOT NULL, PRIMARY KEY(`articleId`), " +
+                        "FOREIGN KEY(`articleId`) REFERENCES `articles`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+                )
+            }
+        }
+
+        val MIGRATIONS = arrayOf(
+            MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+        )
     }
 }
 

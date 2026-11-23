@@ -37,6 +37,7 @@ class Repository(
     val articleDao = db.articleDao()
     val queueDao = db.queueDao()
     val listenDao = db.listenDao()
+    val playActionDao = db.playActionDao()
 
     /** Outlives screens, so a refresh keeps running when the user navigates away. */
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -315,19 +316,48 @@ class Repository(
     }
 
     /** Remembers where playback of an episode stopped. */
-    suspend fun savePlayPosition(id: Long, positionMs: Long) = articleDao.setPlayPosition(id, positionMs)
+    /** Also noted for gPodder Sync, like every change of where an episode was heard. */
+    suspend fun savePlayPosition(id: Long, positionMs: Long) = db.withTransaction {
+        articleDao.setPlayPosition(id, positionMs)
+        playActionDao.record(id, positionMs, System.currentTimeMillis())
+    }
 
     /** Played to the end counts as read; marking as not played leaves the read state alone. */
     suspend fun setPlayed(id: Long, played: Boolean) {
         val now = System.currentTimeMillis()
         db.withTransaction {
-            articleDao.setPlayed(id, if (played) now else 0)
-            if (played) {
-                articleDao.markReadIfUnread(listOf(id), now)
-                // Heard: done with it, it leaves the queue.
-                queueDao.remove(id)
-            }
+            applyPlayed(id, played, now)
+            // For other apps, "heard" is having reached the end; "not heard" is the start.
+            val endMs = articleDao.byId(id)?.durationSeconds?.times(1000)
+            playActionDao.record(id, if (played) endMs ?: 0 else 0, now)
         }
+    }
+
+    private suspend fun applyPlayed(id: Long, played: Boolean, now: Long) {
+        articleDao.setPlayed(id, if (played) now else 0)
+        if (played) {
+            articleDao.markReadIfUnread(listOf(id), now)
+            // Heard: done with it, it leaves the queue.
+            queueDao.remove(id)
+        }
+    }
+
+    /**
+     * Where an episode was heard on another device (from gPodder Sync), unless it changed here
+     * later. Not noted for sending back. Returns whether it was taken over.
+     */
+    suspend fun applyRemotePlay(id: Long, positionMs: Long, played: Boolean, at: Long): Boolean = db.withTransaction {
+        val article = articleDao.byId(id) ?: return@withTransaction false
+        val local = playActionDao.byArticle(id)
+        if (local != null && local.at >= at) return@withTransaction false
+        if (played) {
+            if (article.playedAt == 0L) applyPlayed(id, true, at)
+            articleDao.setPlayPosition(id, 0)
+        } else {
+            if (article.playedAt > 0) articleDao.setPlayed(id, 0)
+            articleDao.setPlayPosition(id, positionMs)
+        }
+        true
     }
 
     /** Archived articles leave the lists and count as read; the search and the archive still show them. */
@@ -425,6 +455,18 @@ class Repository(
             SyncArticle(it.feedUrl, it.guid, it.title, it.link, it.pubDate, it.starred, it.note, it.stateUpdatedAt)
         }
         return SyncState(feeds = feeds + tombstones, articles = articles)
+    }
+
+    /**
+     * A podcast subscribed elsewhere (gPodder Sync): taken over with its address only, the next
+     * update fetches the rest. Returns false if it is here already.
+     */
+    suspend fun subscribeFromSync(url: String): Boolean = db.withTransaction {
+        val normalized = normalizeUrl(url.trim())
+        if (feedDao.byUrl(normalized) != null) return@withTransaction false
+        feedDao.removeTombstone(normalized)
+        feedDao.insert(Feed(url = normalized, title = normalized, updatedAt = System.currentTimeMillis()))
+        true
     }
 
     /** Brings the local data in line with a merged state. Returns the number of feeds added. */

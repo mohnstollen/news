@@ -160,6 +160,14 @@ Die App legt im gewählten Ordner zwei Dateien an:
 Der Gelesen-Status wird nicht synchronisiert. Das Passwort wird verschlüsselt im Android
 Keystore abgelegt.
 
+**Podfang mit gPodder Sync**: Ist auf dem Server die Nextcloud-App
+[gPodder Sync](https://apps.nextcloud.com/apps/gpoddersync) installiert, gleicht Podfang bei jedem
+Sync zusätzlich Abos und Hörstand über deren Schnittstelle ab, dieselbe, die AntennaPod und andere
+Podcast-Apps nutzen. Abos gehen in beide Richtungen; Hörposition und „gehört“ (bis kurz vor dem
+Ende gehört) ebenso, wobei pro Folge die jüngste Änderung gilt. Beim ersten Abgleich bleiben die
+Podcasts auf dem Handy erhalten und werden hochgeladen. Fehlt die App auf dem Server, steht das unter
+Einstellungen → Nextcloud-Synchronisation; der übrige Abgleich läuft weiter. Abschaltbar dort.
+
 ## Code im Kern
 
 Pfade relativ zu `core/src/main/java/io/github/mohnstollen/news/`.
@@ -175,6 +183,7 @@ Pfade relativ zu `core/src/main/java/io/github/mohnstollen/news/`.
 | `data/Network.kt` | Abruf, Feed-Suche auf Webseiten, Volltext-Extraktion |
 | `data/Opml.kt` | OPML lesen und schreiben |
 | `data/Sync.kt` | WebDAV-Client und Abgleich |
+| `data/GpodderSync.kt` | Abos und Hörstand mit der Nextcloud-App gPodder Sync (nur Podfang) |
 | `data/NextcloudLogin.kt` | Anmeldung: Login Flow v2, Anmelde-QR-Code lesen und dekodieren |
 | `data/Repository.kt` | Aktualisieren, Abonnements, Artikelstatus |
 | `work/RefreshWorker.kt` | Hintergrund-Aktualisierung mit WorkManager |

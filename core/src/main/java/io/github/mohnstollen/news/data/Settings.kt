@@ -53,6 +53,10 @@ data class Prefs(
     val queueDownloads: Boolean = true,
     /** Next to play/pause on the lock screen: back 10 s / forward 30 s instead of previous/next episode. */
     val lockScreenSeek: Boolean = false,
+    /** Podfang: also sync subscriptions and listening positions with gPodder Sync on the Nextcloud. */
+    val gpodderSync: Boolean = true,
+    /** Outcome of the last gPodder Sync round: null if it went well, else why not. */
+    val gpodderStatus: String? = null,
 ) {
     val syncConfigured: Boolean get() = ncServer.isNotBlank() && ncUser.isNotBlank()
 }
@@ -98,6 +102,8 @@ class SettingsStore(context: Context, private val defaults: Prefs = Prefs()) {
             downloadEnqueues = sp.getBoolean("downloadEnqueues", d.downloadEnqueues),
             queueDownloads = sp.getBoolean("queueDownloads", d.queueDownloads),
             lockScreenSeek = sp.getBoolean("lockScreenSeek", d.lockScreenSeek),
+            gpodderSync = sp.getBoolean("gpodderSync", d.gpodderSync),
+            gpodderStatus = sp.getString("gpodderStatus", d.gpodderStatus),
         )
     }
 
@@ -130,6 +136,8 @@ class SettingsStore(context: Context, private val defaults: Prefs = Prefs()) {
             .putBoolean("downloadEnqueues", p.downloadEnqueues)
             .putBoolean("queueDownloads", p.queueDownloads)
             .putBoolean("lockScreenSeek", p.lockScreenSeek)
+            .putBoolean("gpodderSync", p.gpodderSync)
+            .putString("gpodderStatus", p.gpodderStatus)
             .apply()
         _flow.value = p
     }

@@ -214,6 +214,25 @@ fun SettingsScreen(onBack: (() -> Unit)?, onOpenDownloads: (() -> Unit)? = null)
                 enabled = prefs.syncConfigured,
                 onChange = { value -> settings.update { it.copy(ncAutoSync = value) } },
             )
+            if (container.features.podcasts) {
+                SwitchRow(
+                    title = "Hörstand mit gPodder Sync abgleichen",
+                    subtitle = "Abos, Hörposition und gehörte Folgen, auch mit AntennaPod und anderen Podcast-Apps. " +
+                        "Braucht die Nextcloud-App „gPodder Sync“ auf dem Server.",
+                    checked = prefs.gpodderSync,
+                    enabled = prefs.syncConfigured,
+                    onChange = { value -> settings.update { it.copy(gpodderSync = value, gpodderStatus = null) } },
+                )
+                val status = prefs.gpodderStatus
+                if (prefs.syncConfigured && prefs.gpodderSync && status != null) {
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    )
+                }
+            }
             Spacer(Modifier.height(32.dp))
         }
     }
