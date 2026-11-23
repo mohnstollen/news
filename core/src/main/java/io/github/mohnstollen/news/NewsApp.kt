@@ -16,6 +16,7 @@ import io.github.mohnstollen.news.data.SyncManager
 import io.github.mohnstollen.news.data.newHttpClient
 import io.github.mohnstollen.news.playback.Downloads
 import io.github.mohnstollen.news.playback.SleepTimer
+import io.github.mohnstollen.news.widget.PlayerWidgetUpdater
 import io.github.mohnstollen.news.work.RefreshWorker
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.launch
@@ -34,9 +35,13 @@ class AppContainer(app: Application, val features: AppFeatures) {
     val downloads = Downloads(app, repository, settings)
     val sleepTimer = SleepTimer()
     val recommender = Recommender(http, repository)
+    val playerWidget = PlayerWidgetUpdater(app, repository, settings)
 
     init {
-        if (features.podcasts) repository.onNewEpisodes = downloads::enqueueNewEpisodes
+        if (features.podcasts) {
+            repository.onNewEpisodes = downloads::enqueueNewEpisodes
+            repository.onQueued = downloads::onQueued
+        }
         repository.onFeedDeleting = downloads::deleteFiles
     }
 }
@@ -56,6 +61,7 @@ open class NewsApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         RefreshWorker.schedule(this, container.settings.current)
+        if (features.podcasts) container.playerWidget.start()
         // Episodes downloaded while this app still played podcasts cannot be used any more.
         if (!features.podcasts) {
             container.repository.scope.launch {

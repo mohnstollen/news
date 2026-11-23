@@ -365,6 +365,8 @@ class LoginFlowUiTest : UiTestBase() {
 
             // The login page opens; the app waits.
             waitFor("Zugriff gewähren")
+            // The page is opened right after the text appears; wait for it rather than look at once.
+            compose.waitUntil(5_000) { org.robolectric.Shadows.shadowOf(compose.activity).peekNextStartedActivity() != null }
             val opened = org.robolectric.Shadows.shadowOf(compose.activity).nextStartedActivity
             assertEquals(android.content.Intent.ACTION_VIEW, opened.action)
             assertEquals(server.url("/login/v2/flow/xyz").toString(), opened.dataString)
@@ -653,11 +655,15 @@ class QueueAndStatsUiTest : UiTestBase() {
         // The list follows the database a moment later; tap only once it shows the new order.
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("Episode ", substring = true).fetchSemanticsNodes()
-                .mapNotNull { node -> node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text)?.firstOrNull()?.text }
-                .filter { it.startsWith("Episode ") } == listOf("Episode 1", "Episode 2")
+                .mapNotNull { node ->
+                    // The row's texts start with the cover's letter; the title follows.
+                    node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text)
+                        ?.map { it.text }?.firstOrNull { it.startsWith("Episode ") }
+                } == listOf("Episode 1", "Episode 2")
         }
         compose.waitForIdle()
-        compose.onAllNodesWithContentDescription("Aus der Warteschlange entfernen")[0].performClick()
+        // Swiping left takes it out of the queue.
+        compose.onNodeWithText("Episode 1").performTouchInput { swipeLeft() }
         compose.waitUntil(10_000) { runBlocking { repo.queueDao.ids() } == listOf(two) }
 
         // In the reader, the queue button shows that it is queued and takes it out.
@@ -742,78 +748,83 @@ class PodfangModeUiTest : UiTestBase() {
     }
 
     @Test(timeout = 120000)
-    fun podfangHasTabsPodcastWordsAndItsOwnFolder() {
-        val episode = runBlocking {
+    fun podfangSortsNewEpisodesIntoTheQueueAndShowsPodcasts() {
+        val (fresh, loaded) = runBlocking {
             val feedId = repo.feedDao.all().first().id
             val file = java.io.File(context.filesDir, "geladen.mp3").apply { writeText("x") }
-            repo.articleDao.insertAll(
+            val now = System.currentTimeMillis()
+            val ids = repo.articleDao.insertAll(
                 listOf(
                     Article(
-                        feedId = feedId, guid = "dl", title = "Geladene Folge", pubDate = System.currentTimeMillis(),
-                        fetchedAt = 0, enclosureUrl = "https://example.org/dl.mp3", durationSeconds = 1800,
-                        downloadPath = file.path,
+                        feedId = feedId, guid = "neu", title = "Neue Folge", pubDate = now, fetchedAt = 0,
+                        enclosureUrl = "https://example.org/neu.mp3", durationSeconds = 1800,
+                    ),
+                    Article(
+                        feedId = feedId, guid = "dl", title = "Geladene Folge", pubDate = now - 1, fetchedAt = 0,
+                        enclosureUrl = "https://example.org/dl.mp3", durationSeconds = 1800, downloadPath = file.path,
                     ),
                 ),
-            ).single().also { repo.enqueue(it) }
+            )
+            repo.enqueue(ids[1])
+            ids[0] to ids[1]
         }
-        waitFor("Alle Folgen")
-        // The test data is called "Artikel Nummer …"; the app's own words must not be reader words.
+        fun tab(name: String) = compose.onNodeWithContentDescription(name, useUnmergedTree = true).performClick()
+        fun queue() = runBlocking { repo.queueDao.ids() }
+
+        // "Neu": what is not sorted yet. The queued episode is not here; there is no side menu.
+        waitFor("Neue Folge")
+        assertTrue(compose.onAllNodesWithText("Geladene Folge").fetchSemanticsNodes().isEmpty())
+        assertTrue(compose.onAllNodesWithContentDescription("Podcasts anzeigen").fetchSemanticsNodes().isEmpty())
         assertTrue(compose.onAllNodesWithText("Alle Artikel").fetchSemanticsNodes().isEmpty())
-        assertTrue(compose.onAllNodesWithText("Ungelesen").fetchSemanticsNodes().isEmpty())
-        compose.onNodeWithText("Offen").assertIsDisplayed()
-        screenshot("podfang-folgen")
+        screenshot("podfang-neu")
 
-        // The side menu: only the episodes, the podcasts and their management.
-        compose.onNodeWithContentDescription("Podcasts anzeigen").performClick()
-        waitFor("Podfang")
-        for (entry in listOf("Gemerkt", "Archiv", "Statistik", "Podcasts entdecken")) {
-            assertTrue("$entry is not in the side menu", compose.onAllNodesWithText(entry).fetchSemanticsNodes().isEmpty())
-        }
-        screenshot("podfang-menue")
-        openFromDrawer("Podcasts verwalten")
-        compose.waitUntil(5_000) {
-            compose.onAllNodesWithText("Podcast hinzufügen", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithContentDescription("Zurück").performClick()
+        // Downloading it puts it into the queue, so it leaves "Neu".
+        compose.onNodeWithContentDescription("Herunterladen").performClick()
+        compose.waitUntil(5_000) { queue() == listOf(loaded, fresh) }
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Neue Folge").fetchSemanticsNodes().isEmpty() }
 
-        // "Mehr": the starred episodes, then back to all of them with the Podcasts tab.
-        compose.onNodeWithContentDescription("Mehr", useUnmergedTree = true).performClick()
-        compose.onNodeWithText("Gemerkt").performClick()
-        waitFor("Noch keine Folgen gemerkt.")
-        compose.onNodeWithContentDescription("Podcasts", useUnmergedTree = true).performClick()
-        waitFor("Alle Folgen")
-        compose.onNodeWithContentDescription("Mehr", useUnmergedTree = true).performClick()
-        compose.onNodeWithText("Statistik").performClick()
-        waitFor("Noch nichts gehört.")
-        compose.onNodeWithContentDescription("Zurück").performClick()
-        waitFor("Alle Folgen")
-
-        // Queue tab: length per episode and in total.
-        compose.onNodeWithContentDescription("Warteschlange", useUnmergedTree = true).performClick()
-        waitFor("1 Folge · 30 Min verbleibend")
-        assertTrue("a tab has no back arrow", compose.onAllNodesWithContentDescription("Zurück").fetchSemanticsNodes().isEmpty())
+        // Queue: both, with the time left; swiping right moves one to the end ("later").
+        tab("Warteschlange")
+        waitFor("2 Folgen · 1:00 Std verbleibend")
         screenshot("podfang-warteschlange")
+        compose.onNodeWithText("Geladene Folge").performTouchInput { swipeRight() }
+        compose.waitUntil(5_000) { queue() == listOf(fresh, loaded) }
 
-        // Downloads tab: the downloaded episode, with the total.
-        compose.onNodeWithContentDescription("Downloads", useUnmergedTree = true).performClick()
-        waitFor("Geladene Folge")
-        waitFor("1 Folge · 30 Min")
-        screenshot("podfang-downloads")
+        // Podcasts: the grid, then one podcast's overview.
+        tab("Podcasts")
+        waitFor("Beispielfeed")
+        screenshot("podfang-podcasts")
+        compose.onNodeWithText("Beispielfeed").performClick()
+        waitFor("32 Folgen")
+        compose.onNodeWithContentDescription("Podcast abbestellen").assertIsDisplayed()
+        assertTrue("no tabs on a podcast", compose.onAllNodesWithContentDescription("Warteschlange", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        screenshot("podfang-podcast")
 
-        // Settings tab: podcast settings, no widget, no full text.
-        compose.onNodeWithContentDescription("Einstellungen", useUnmergedTree = true).performClick()
+        // From an episode back to its podcast.
+        compose.onNodeWithText("Neue Folge").performClick()
+        waitFor("Alle Folgen des Podcasts")
+        compose.onNodeWithText("Alle Folgen des Podcasts").performClick()
+        waitFor("32 Folgen")
+        compose.onNodeWithContentDescription("Zurück").performClick()
+        compose.onNodeWithContentDescription("Zurück").performClick()
+        compose.onNodeWithContentDescription("Zurück").performClick()
+
+        // "Mehr": settings with the new switches, and the starred episodes.
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithContentDescription("Mehr", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        tab("Mehr")
+        compose.onNodeWithText("Einstellungen").performClick()
         waitFor("Intervall in Minuten")
+        compose.onNodeWithText("Folgen der Warteschlange laden").performScrollTo().assertIsDisplayed()
         assertTrue(compose.onAllNodesWithText("Widget").fetchSemanticsNodes().isEmpty())
         assertEquals("own Nextcloud folder", "Podfang", context.container.settings.current.ncFolder)
         assertEquals("Podfang (Android)", context.container.features.clientName)
-
-        // Back to the episodes; the reader offers no full text.
-        compose.onNodeWithContentDescription("Podcasts", useUnmergedTree = true).performClick()
-        waitFor("Geladene Folge")
-        compose.onNodeWithText("Geladene Folge").performClick()
-        compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("Archivieren").fetchSemanticsNodes().isNotEmpty() }
-        assertTrue(compose.onAllNodesWithContentDescription("Volltext laden").fetchSemanticsNodes().isEmpty())
-        assertTrue("no tabs on an episode", compose.onAllNodesWithContentDescription("Downloads", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
-        assertEquals(episode, runBlocking { repo.queueDao.ids() }.single())
+        compose.onNodeWithContentDescription("Zurück").performClick()
+        tab("Mehr")
+        compose.onNodeWithText("Gemerkt").performClick()
+        waitFor("Noch keine Folgen gemerkt.")
+        tab("Neu")
+        waitFor("Artikel Nummer 1")
     }
 }

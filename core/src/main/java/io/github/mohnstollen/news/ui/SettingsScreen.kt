@@ -81,7 +81,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: (() -> Unit)?) {
+fun SettingsScreen(onBack: (() -> Unit)?, onOpenDownloads: (() -> Unit)? = null) {
     val w = LocalContext.current.features
     val context = LocalContext.current
     val container = remember { context.container }
@@ -186,7 +186,7 @@ fun SettingsScreen(onBack: (() -> Unit)?) {
             if (container.features.podcasts) {
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 SectionTitle("Podcasts")
-                PodcastSection(prefs = prefs, onChange = settings::update)
+                PodcastSection(prefs = prefs, onChange = settings::update, onOpenDownloads = onOpenDownloads)
             }
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
@@ -520,7 +520,7 @@ private fun Context.openLoginPage(url: String) {
 }
 
 @Composable
-private fun PodcastSection(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit) {
+private fun PodcastSection(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, onOpenDownloads: (() -> Unit)?) {
     val context = LocalContext.current
     val downloads = context.container.downloads
     val scope = rememberCoroutineScope()
@@ -531,6 +531,18 @@ private fun PodcastSection(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit) {
     LaunchedEffect(active.size, refreshUsage) { usage = downloads.usage() }
     var confirmDelete by remember { mutableStateOf(false) }
 
+    SwitchRow(
+        title = "Folgen der Warteschlange laden",
+        subtitle = "Was du einreihst, wird heruntergeladen, damit es auch offline läuft.",
+        checked = prefs.queueDownloads,
+        onChange = { value -> onChange { it.copy(queueDownloads = value) } },
+    )
+    SwitchRow(
+        title = "Heruntergeladene Folgen einreihen",
+        subtitle = "Was du herunterlädst, kommt in die Warteschlange.",
+        checked = prefs.downloadEnqueues,
+        onChange = { value -> onChange { it.copy(downloadEnqueues = value) } },
+    )
     SwitchRow(
         title = "Downloads nur im WLAN",
         subtitle = "Folgen werden erst geladen, wenn ein Netz ohne Volumenbegrenzung da ist.",
@@ -544,6 +556,7 @@ private fun PodcastSection(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit) {
         onChange = { value -> onChange { it.copy(deletePlayedDownloads = value) } },
     )
     EndBufferRow(seconds = prefs.endBufferSeconds, onChange = { value -> onChange { it.copy(endBufferSeconds = value) } })
+    LockScreenRow(seek = prefs.lockScreenSeek, onChange = { value -> onChange { it.copy(lockScreenSeek = value) } })
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
@@ -558,6 +571,9 @@ private fun PodcastSection(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit) {
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f),
         )
+        if (onOpenDownloads != null && (count > 0 || active.isNotEmpty())) {
+            TextButton(onClick = onOpenDownloads) { Text("Ansehen") }
+        }
         if (count > 0 || active.isNotEmpty()) TextButton(onClick = { confirmDelete = true }) { Text("Alle löschen") }
     }
     Text(
@@ -583,6 +599,33 @@ private fun PodcastSection(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit) {
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Abbrechen") } },
         )
+    }
+}
+
+/** Which pair of buttons sits next to play/pause on the lock screen; the other pair follows. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun LockScreenRow(seek: Boolean, onChange: (Boolean) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Text("Sperrbildschirm: neben Play")
+        Text(
+            "Daneben, wo das Handy Platz hat, die anderen Knöpfe. Manche Handys zeigen auf dem " +
+                "Sperrbildschirm nur zwei; dann zum Werbung-Überspringen „10 s / 30 s“ wählen.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            androidx.compose.material3.FilterChip(
+                selected = !seek,
+                onClick = { onChange(false) },
+                label = { Text("Folge zurück / vor") },
+            )
+            androidx.compose.material3.FilterChip(
+                selected = seek,
+                onClick = { onChange(true) },
+                label = { Text("10 s zurück / 30 s vor") },
+            )
+        }
     }
 }
 

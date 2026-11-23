@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Podfang, the podcast app: no home screen widget (it lists unread articles). -->
+<!-- Podfang, the podcast app: its own player widget instead of the one listing unread articles. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 

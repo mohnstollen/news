@@ -123,19 +123,7 @@ class PlaybackServiceTest {
         assertTrue(player.playWhenReady)
     }
 
-    /** Silence as a WAV file (half a second by default), which the player can play without a decoder. */
-    private fun silence(name: String, seconds: Double = 0.5): java.io.File {
-        val rate = 4000
-        val samples = (rate * seconds).toInt()
-        val data = ByteArray(samples * 2)
-        val header = java.nio.ByteBuffer.allocate(44).order(java.nio.ByteOrder.LITTLE_ENDIAN).apply {
-            put("RIFF".toByteArray()); putInt(36 + data.size); put("WAVE".toByteArray())
-            put("fmt ".toByteArray()); putInt(16); putShort(1); putShort(1); putInt(rate); putInt(rate * 2)
-            putShort(2); putShort(16)
-            put("data".toByteArray()); putInt(data.size)
-        }.array()
-        return java.io.File(context.filesDir, name).apply { writeBytes(header + data) }
-    }
+    private fun silence(name: String, seconds: Double = 0.5) = silenceFile(context, name, seconds)
 
     @Test
     fun theNextQueuedEpisodeFollowsAndListeningIsCounted() {
@@ -167,7 +155,7 @@ class PlaybackServiceTest {
         }
         runBlocking {
             assertTrue("first marked played", repo.articleDao.byId(first)!!.playedAt > 0)
-            assertTrue("queue used up", repo.queueDao.ids().isEmpty())
+            assertEquals("the finished one left, the playing one stays until it ends", listOf(second), repo.queueDao.ids())
         }
         waitFor("finished counted") {
             runBlocking { repo.listenDao.observeTotals(0).first().finished } >= 1
@@ -277,5 +265,78 @@ class PlaybackServiceTest {
         } finally {
             server.shutdown()
         }
+    }
+
+    @Test
+    fun lockScreenButtonsInBothLayouts() {
+        val episodes = io.github.mohnstollen.news.playback.LockScreenControls
+        // Previous/next episode next to play: the 10 s and 30 s buttons come after, 30 s first.
+        val episodesFirst = episodes.buttons(seekMain = false)
+        assertEquals(listOf("podfang.SEEK_FORWARD", "podfang.SEEK_BACK"), episodesFirst.map { it.sessionCommand!!.customAction })
+        assertTrue(episodesFirst.all { it.slots.get(0) == androidx.media3.session.CommandButton.SLOT_OVERFLOW })
+        assertTrue(episodes.notificationPlayerCommands(false).contains(androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT))
+        // 10 s / 30 s next to play: they take those places, the episode buttons follow.
+        val seekFirst = episodes.buttons(seekMain = true)
+        assertEquals(androidx.media3.session.CommandButton.SLOT_BACK, seekFirst[0].slots.get(0))
+        assertEquals(androidx.media3.session.CommandButton.SLOT_FORWARD, seekFirst[1].slots.get(0))
+        assertEquals(listOf("podfang.NEXT_EPISODE", "podfang.PREVIOUS_EPISODE"), seekFirst.drop(2).map { it.sessionCommand!!.customAction })
+        val commands = episodes.notificationPlayerCommands(true)
+        assertTrue(!commands.contains(androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT))
+        assertTrue(!commands.contains(androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS))
+    }
+
+    @Test
+    fun nextPreviousAndSeekButtonsWorkLikeOnTheLockScreen() {
+        val (a, b) = runBlocking {
+            val feedId = repo.feedDao.insert(Feed(url = "https://example.org/feed", title = "Der Podcast"))
+            fun episode(guid: String) = Article(
+                feedId = feedId, guid = guid, title = "Folge $guid", pubDate = 0, fetchedAt = 0,
+                enclosureUrl = "https://cdn.example.org/$guid.wav", enclosureType = "audio/wav",
+                downloadPath = silence("$guid.wav", seconds = 100.0).path,
+            )
+            val ids = repo.articleDao.insertAll(listOf(episode("a"), episode("b")))
+            repo.enqueue(ids[1], handOn = false)
+            ids[0] to ids[1]
+        }
+        val service = startService()
+        val session = service.sessions.single()
+        val player = session.player
+        val future = MediaController.Builder(context, session.token).buildAsync()
+        waitFor("controller") { future.isDone }
+        val controller = future.get()
+        assertTrue("next is offered", controller.isCommandAvailable(androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT))
+        assertTrue(controller.availableSessionCommands.contains(io.github.mohnstollen.news.playback.LockScreenControls.SEEK_FORWARD))
+
+        controller.setMediaItem(MediaItem.Builder().setMediaId(a.toString()).build())
+        controller.prepare()
+        waitFor("prepared") { player.duration > 0 }
+        // Still offered after the player changed its own commands for the new episode.
+        assertTrue(controller.isCommandAvailable(androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT))
+        assertTrue(controller.isCommandAvailable(androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS))
+        // Events reach the controllers (the app's mini player depends on them).
+        waitFor("controller sees the episode") { controller.currentMediaItem?.mediaId == a.toString() }
+
+        // +30 s and -10 s, as the lock screen sends them.
+        controller.sendCustomCommand(io.github.mohnstollen.news.playback.LockScreenControls.SEEK_FORWARD, android.os.Bundle.EMPTY)
+        waitFor("forward") { player.currentPosition in 30_000L..31_000L }
+        controller.sendCustomCommand(io.github.mohnstollen.news.playback.LockScreenControls.SEEK_BACK, android.os.Bundle.EMPTY)
+        waitFor("back") { player.currentPosition in 20_000L..21_000L }
+
+        // Next: the next episode of the queue; a keeps its place.
+        controller.seekToNext()
+        waitFor("next episode") { player.currentMediaItem?.mediaId == b.toString() }
+        assertEquals(listOf(a, b), runBlocking { repo.queueDao.ids() })
+        waitFor("a's position saved") { runBlocking { repo.articleDao.byId(a)!!.playPosition } in 20_000L..21_000L }
+
+        // Previous, right at the start: back to a, where it was left.
+        controller.seekToPrevious()
+        waitFor("previous episode") { player.currentMediaItem?.mediaId == a.toString() }
+        waitFor("resumed") { player.currentPosition in 20_000L..21_000L }
+
+        // Previous, well into the episode: to its start.
+        controller.seekToPrevious()
+        waitFor("restart") { player.currentPosition < 1_000L }
+        assertEquals(a.toString(), player.currentMediaItem?.mediaId)
+        controller.release()
     }
 }

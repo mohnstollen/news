@@ -40,7 +40,8 @@ data class AppFeatures(
             appName = "Podfang",
             podcasts = true,
             syncFolder = "Podfang",
-            allItems = "Alle Folgen",
+            // The inbox: what is new and not yet sorted into the queue or the archive.
+            allItems = "Neu",
             manageFeeds = "Podcasts verwalten",
             addFeed = "Podcast hinzufügen",
             podcastWords = true,

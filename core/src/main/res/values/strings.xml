@@ -4,4 +4,13 @@
     <string name="widget_configure">Auswahl ändern</string>
     <string name="widget_refresh">Aktualisieren</string>
     <string name="widget_empty">Keine ungelesenen Artikel</string>
+    <string name="player_widget_description">Laufende Folge mit Knöpfen und die nächsten Folgen der Warteschlange</string>
+    <string name="player_widget_preview">Laufende Folge und Warteschlange</string>
+    <string name="player_widget_open">Player öffnen</string>
+    <string name="player_widget_play">Abspielen</string>
+    <string name="player_widget_pause">Pause</string>
+    <string name="player_widget_back">10 Sekunden zurück</string>
+    <string name="player_widget_forward">30 Sekunden vor</string>
+    <string name="player_widget_next">Nächste Folge</string>
+    <string name="player_widget_up_next">Als Nächstes</string>
 </resources>

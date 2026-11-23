@@ -128,6 +128,8 @@ data class QueueItem(
     val durationSeconds: Long?,
     val playPosition: Long,
     val downloaded: Boolean,
+    val imageUrl: String? = null,
+    val feedImageUrl: String? = null,
 )
 
 /**
@@ -169,7 +171,7 @@ data class DayListening(val day: Long, val listenedMs: Long)
 interface QueueDao {
     @Query(
         "SELECT a.id, a.title, f.title AS feedTitle, a.durationSeconds, a.playPosition, " +
-            "(a.downloadPath IS NOT NULL) AS downloaded " +
+            "(a.downloadPath IS NOT NULL) AS downloaded, a.imageUrl, f.imageUrl AS feedImageUrl " +
             "FROM queue q JOIN articles a ON a.id = q.articleId JOIN feeds f ON f.id = a.feedId ORDER BY q.position",
     )
     fun observe(): Flow<List<QueueItem>>
@@ -311,6 +313,9 @@ interface FeedDao {
 
     @Query("SELECT * FROM feeds WHERE id = :id")
     suspend fun byId(id: Long): Feed?
+
+    @Query("SELECT * FROM feeds WHERE id = :id")
+    fun observeById(id: Long): Flow<Feed?>
 
     @Query("SELECT * FROM feeds WHERE url = :url")
     suspend fun byUrl(url: String): Feed?

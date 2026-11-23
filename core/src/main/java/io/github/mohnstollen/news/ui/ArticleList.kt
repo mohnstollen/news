@@ -158,6 +158,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
     val downloads = container.downloads.progress
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+    /** With tabs (Podfang), "Neu" leaves out queued episodes; otherwise nothing. */
+    private val inboxHides: kotlinx.coroutines.flow.Flow<Set<Long>> =
+        if (container.features.tabs) repo.queueDao.observeIds().map { it.toSet() }
+        else kotlinx.coroutines.flow.flowOf(emptySet())
+
     val queueSize = repo.queueDao.observeIds().map { it.size }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
@@ -225,8 +230,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 filter,
                 keepVisible,
                 _recentOnly,
-                _folder,
-            ) { all, (unreadOnly, newestFirst, hideReadAfter), keep, recentOnly, folder ->
+                _folder.combine(inboxHides) { f, q -> f to q },
+            ) { all, (unreadOnly, newestFirst, hideReadAfter), keep, recentOnly, (folder, queued) ->
                 val now = System.currentTimeMillis()
                 // The quick filters belong to the article lists; starred and archive show everything.
                 val filterable = scope !is ListScope.Starred && scope !is ListScope.Archive
@@ -238,7 +243,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         (!filterable || item.id in keep ||
                             ReadVisibility.isVisible(item.read, item.readAt, hideReadAfter, now)) &&
                         (since == null || item.pubDate >= since) &&
-                        (inFolder == null || item.category == inFolder)
+                        (inFolder == null || item.category == inFolder) &&
+                        // "Neu" is the inbox: what went into the queue is sorted already.
+                        (scope !is ListScope.All || item.id !in queued)
                 }
                 if (newestFirst) filtered else filtered.asReversed()
             }
@@ -406,6 +413,8 @@ fun ArticleListScreen(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
+        // With tabs there is no side menu: the podcasts have their own tab.
+        gesturesEnabled = !features.tabs,
         drawerContent = {
             FeedDrawer(
                 feeds = feeds,
@@ -449,8 +458,10 @@ fun ArticleListScreen(
                     title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     scrollBehavior = scrollBehavior,
                     navigationIcon = {
-                        IconButton(onClick = { coroutineScope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, contentDescription = features.pick("Feeds anzeigen", "Podcasts anzeigen"))
+                        if (!features.tabs) {
+                            IconButton(onClick = { coroutineScope.launch { drawerState.open() } }) {
+                                Icon(Icons.Default.Menu, contentDescription = features.pick("Feeds anzeigen", "Podcasts anzeigen"))
+                            }
                         }
                     },
                     actions = {

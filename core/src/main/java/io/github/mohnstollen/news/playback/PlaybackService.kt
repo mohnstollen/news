@@ -22,7 +22,13 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
-import androidx.media3.session.CommandButton
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionError
+import androidx.media3.session.SessionResult
+import com.google.common.util.concurrent.Futures
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.google.common.util.concurrent.ListenableFuture
@@ -87,6 +93,12 @@ class PlaybackService : MediaSessionService() {
             .build()
         player.playbackParameters = PlaybackParameters(container.settings.current.playbackSpeed)
         player.addListener(listener)
+        // The system's next/previous (lock screen, headset, car) mean episodes.
+        val queuePlayer = QueuePlayer(
+            player,
+            onNext = { main.launch { playNextEpisode() } },
+            onPrevious = { main.launch { playPreviousEpisode() } },
+        )
 
         val openApp = PendingIntent.getActivity(
             this,
@@ -94,28 +106,53 @@ class PlaybackService : MediaSessionService() {
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        session = MediaSession.Builder(this, player)
+        session = MediaSession.Builder(this, queuePlayer)
             .setCallback(callback)
             .setSessionActivity(openApp)
-            // Notification and lock screen: back 10 s, play/pause, forward 30 s.
-            .setMediaButtonPreferences(
-                listOf(
-                    CommandButton.Builder(CommandButton.ICON_SKIP_BACK_10)
-                        .setPlayerCommand(Player.COMMAND_SEEK_BACK)
-                        .setDisplayName("10 Sekunden zurück")
-                        .setSlots(CommandButton.SLOT_BACK)
-                        .build(),
-                    CommandButton.Builder(CommandButton.ICON_SKIP_FORWARD_30)
-                        .setPlayerCommand(Player.COMMAND_SEEK_FORWARD)
-                        .setDisplayName("30 Sekunden vor")
-                        .setSlots(CommandButton.SLOT_FORWARD)
-                        .build(),
-                ),
-            )
+            .setMediaButtonPreferences(LockScreenControls.buttons(seekMain()))
             .build()
             .also(::addSession)
 
         main.launch { container.sleepTimer.mode.collect(::onSleepTimer) }
+        // The button layout follows the setting at once, also while playing.
+        main.launch {
+            container.settings.flow.map { it.lockScreenSeek }.distinctUntilChanged().drop(1).collect { seek ->
+                val s = session ?: return@collect
+                s.setMediaButtonPreferences(LockScreenControls.buttons(seek))
+                s.mediaNotificationControllerInfo?.let {
+                    s.setAvailableCommands(it, LockScreenControls.sessionCommands, LockScreenControls.notificationPlayerCommands(seek))
+                }
+            }
+        }
+    }
+
+    private fun seekMain() = container.settings.current.lockScreenSeek
+
+    /** Episodes played before the current one, the latest last; for "previous episode". */
+    private val history = ArrayDeque<Long>()
+    private var lastArticleId: Long? = null
+    private var goingBack = false
+
+    /** "Next": the next episode of the queue; the current one keeps its place and position. */
+    private suspend fun playNextEpisode() {
+        val next = repo.nextInQueue(currentArticleId()) ?: return
+        playFromQueue(next)
+    }
+
+    /**
+     * "Previous": a few seconds into an episode, back to the one played before (where it was
+     * left); otherwise, or without one, to the start of this one. As most players do.
+     */
+    private suspend fun playPreviousEpisode() {
+        val player = session?.player ?: return
+        if (player.currentPosition > RESTART_WINDOW_MS || history.isEmpty()) {
+            player.seekTo(0)
+            return
+        }
+        val previous = history.removeLast()
+        goingBack = true
+        repo.enqueueIfAbsent(previous, next = true, handOn = false)
+        playFromQueue(previous)
     }
 
     private fun onSleepTimer(mode: SleepTimer.Mode?) {
@@ -141,6 +178,9 @@ class PlaybackService : MediaSessionService() {
     private suspend fun playFromQueue(articleId: Long) {
         val (item, start) = Episodes.resolve(articleId.toString(), repo.articleDao, repo.feedDao, endBufferMs()) ?: return
         val player = session?.player ?: return
+        // The episode being replaced keeps its place and listening time, also when it was paused.
+        savePosition()
+        logListening()
         player.setMediaItem(item, start)
         player.prepare()
         player.play()
@@ -158,6 +198,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        container.playerWidget.nowPlaying.value = null
         savePosition()
         logListening()
         session?.run {
@@ -170,6 +211,34 @@ class PlaybackService : MediaSessionService() {
     }
 
     private val callback = object : MediaSession.Callback {
+        /** Everyone gets our own commands; the notification (and so the lock screen) its layout. */
+        override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
+            val result = MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(LockScreenControls.sessionCommands)
+            if (session.isMediaNotificationController(controller)) {
+                result.setAvailablePlayerCommands(LockScreenControls.notificationPlayerCommands(seekMain()))
+                    .setMediaButtonPreferences(LockScreenControls.buttons(seekMain()))
+            }
+            return result.build()
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: android.os.Bundle,
+        ): ListenableFuture<SessionResult> {
+            val player = session.player
+            when (customCommand.customAction) {
+                LockScreenControls.SEEK_BACK.customAction -> player.seekBack()
+                LockScreenControls.SEEK_FORWARD.customAction -> player.seekForward()
+                LockScreenControls.NEXT_EPISODE.customAction -> main.launch { playNextEpisode() }
+                LockScreenControls.PREVIOUS_EPISODE.customAction -> main.launch { playPreviousEpisode() }
+                else -> return Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
+            }
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
+
         /** Controllers only send the article id; the stored episode supplies address and position. */
         override fun onSetMediaItems(
             mediaSession: MediaSession,
@@ -187,8 +256,9 @@ class PlaybackService : MediaSessionService() {
                 val (item, savedPosition) = Episodes.resolve(wanted.mediaId, repo.articleDao, repo.feedDao, endBufferMs())
                     ?: throw IllegalArgumentException("Folge ${wanted.mediaId} hat keine Audiodatei")
                 val start = if (startPositionMs == C.TIME_UNSET) savedPosition else startPositionMs
-                // Playing an episode takes it out of the queue.
-                wanted.mediaId.toLongOrNull()?.let { repo.dequeue(it) }
+                // What is being listened to is in the queue, at the top if it was not yet there.
+                // Not downloaded for that: it is streaming already.
+                wanted.mediaId.toLongOrNull()?.let { repo.enqueueIfAbsent(it, next = true, handOn = false) }
                 MediaSession.MediaItemsWithStartPosition(listOf(item), 0, start)
             }
         }
@@ -204,6 +274,11 @@ class PlaybackService : MediaSessionService() {
     }
 
     private val listener = object : Player.Listener {
+        /** What the widget shows follows playback; not every event changes that. */
+        override fun onEvents(player: Player, events: Player.Events) {
+            if (events.containsAny(*WIDGET_EVENTS)) container.playerWidget.nowPlaying.value = NowPlaying.of(player)
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             saveJob?.cancel()
             endBufferJob?.cancel()
@@ -225,6 +300,9 @@ class PlaybackService : MediaSessionService() {
             }
         }
 
+        // The length can become known after "ready"; learn it whenever the timeline says it.
+        override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) = learnDuration()
+
         override fun onTracksChanged(tracks: Tracks) {
             val id = currentArticleId() ?: return
             val chapters = id3Chapters(tracks).takeIf { it.isNotEmpty() } ?: return
@@ -232,6 +310,13 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            val now = mediaItem?.mediaId?.toLongOrNull()
+            if (now != lastArticleId) {
+                lastArticleId?.takeIf { !goingBack }?.let { history.addLast(it) }
+                while (history.size > HISTORY_SIZE) history.removeFirst()
+                goingBack = false
+                lastArticleId = now
+            }
             currentArticleId()?.let(::loadLinkedChapters)
             // Time so far belongs to the previous episode.
             logListening()
@@ -251,7 +336,8 @@ class PlaybackService : MediaSessionService() {
                 repo.logListening(id, 0, 0, finished = true)
                 downloads.onPlayed(id)
                 if (stopHere) return@launch
-                val next = repo.takeNextInQueue() ?: return@launch
+                // setPlayed took the finished episode out of the queue.
+                val next = repo.nextInQueue(id) ?: return@launch
                 withContext(Dispatchers.Main) { playFromQueue(next) }
             }
         }
@@ -364,5 +450,18 @@ class PlaybackService : MediaSessionService() {
         /** While playing, the position is stored this often, so little is lost if the app is killed. */
         private const val SAVE_INTERVAL_MS = 10_000L
         private const val END_BUFFER_CHECK_MS = 500L
+        /** "Previous" within this time of an episode's start goes to the episode before. */
+        const val RESTART_WINDOW_MS = 5_000L
+        private const val HISTORY_SIZE = 20
+        private val WIDGET_EVENTS = intArrayOf(
+            Player.EVENT_IS_PLAYING_CHANGED,
+            Player.EVENT_PLAY_WHEN_READY_CHANGED,
+            Player.EVENT_PLAYBACK_STATE_CHANGED,
+            Player.EVENT_MEDIA_ITEM_TRANSITION,
+            Player.EVENT_MEDIA_METADATA_CHANGED,
+            Player.EVENT_POSITION_DISCONTINUITY,
+            Player.EVENT_PLAYBACK_PARAMETERS_CHANGED,
+            Player.EVENT_TIMELINE_CHANGED,
+        )
     }
 }

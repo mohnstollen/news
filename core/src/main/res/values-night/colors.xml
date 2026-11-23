@@ -4,4 +4,9 @@
     <color name="widget_text_secondary">#B8B2BF</color>
     <color name="widget_accent">#FFB68A</color>
     <color name="widget_divider">#1FFFFFFF</color>
+    <!-- Player widget (Podfang): petrol like the Podfang icon. -->
+    <color name="player_widget_accent">#7FD8BE</color>
+    <color name="player_widget_on_accent">#00382D</color>
+    <color name="player_widget_icon">#E6E1E5</color>
+    <color name="player_widget_cover">#22433B</color>
 </resources>

@@ -53,6 +53,23 @@ class Downloads(context: Context, private val repo: Repository, private val sett
         return File(dir, "$articleId.$ext")
     }
 
+    /**
+     * Downloads episodes the user (or a podcast's automatic downloads) asked for. If set, they go
+     * into the queue too: who downloads an episode wants to hear it.
+     */
+    suspend fun download(articleIds: Collection<Long>) {
+        enqueue(articleIds)
+        if (settings.current.downloadEnqueues) articleIds.forEach { repo.enqueueIfAbsent(it) }
+    }
+
+    /** An episode was put into the queue: fetch it, if set (the network setting still applies). */
+    suspend fun onQueued(articleId: Long) {
+        if (!settings.current.queueDownloads) return
+        val article = repo.articleDao.byId(articleId) ?: return
+        if (article.enclosureUrl == null || article.downloadPath != null) return
+        enqueue(listOf(articleId))
+    }
+
     /** Queues downloads; already queued or running ones are left alone. */
     fun enqueue(articleIds: Collection<Long>) {
         val network = if (settings.current.downloadWifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
@@ -70,7 +87,7 @@ class Downloads(context: Context, private val repo: Repository, private val sett
     /** Auto-download: of the new articles, those with a media file. */
     suspend fun enqueueNewEpisodes(articleIds: List<Long>) {
         val episodes = articleIds.filter { repo.articleDao.byId(it)?.enclosureUrl != null }
-        if (episodes.isNotEmpty()) enqueue(episodes)
+        if (episodes.isNotEmpty()) download(episodes)
     }
 
     fun cancel(articleId: Long) {

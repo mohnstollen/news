@@ -322,7 +322,11 @@ class Repository(
         val now = System.currentTimeMillis()
         db.withTransaction {
             articleDao.setPlayed(id, if (played) now else 0)
-            if (played) articleDao.markReadIfUnread(listOf(id), now)
+            if (played) {
+                articleDao.markReadIfUnread(listOf(id), now)
+                // Heard: done with it, it leaves the queue.
+                queueDao.remove(id)
+            }
         }
     }
 
@@ -343,12 +347,34 @@ class Repository(
     // ---- Queue ------------------------------------------------------------------------------
 
     /** Puts an episode into the queue: next in line, or at the end. Moves it if already queued. */
-    suspend fun enqueue(articleId: Long, next: Boolean = false) = db.withTransaction {
-        val position = if (next) (queueDao.minPosition() ?: 1) - 1 else (queueDao.maxPosition() ?: -1) + 1
-        queueDao.put(QueueEntry(articleId, position))
+    /** [handOn]: tell [onQueued] about a newly queued episode (which downloads it, if set). */
+    suspend fun enqueue(articleId: Long, next: Boolean = false, handOn: Boolean = true) {
+        val added = db.withTransaction {
+            val wasQueued = articleId in queueDao.ids()
+            val position = if (next) (queueDao.minPosition() ?: 1) - 1 else (queueDao.maxPosition() ?: -1) + 1
+            queueDao.put(QueueEntry(articleId, position))
+            !wasQueued
+        }
+        if (added && handOn) onQueued?.invoke(articleId)
     }
 
+    /** Puts the episode into the queue unless it is there already; returns whether it was added. */
+    suspend fun enqueueIfAbsent(articleId: Long, next: Boolean = false, handOn: Boolean = true): Boolean {
+        if (articleId in queueDao.ids()) return false
+        enqueue(articleId, next, handOn)
+        return true
+    }
+
+    /** Gets each episode newly put into the queue; set by the app, e.g. to download it. */
+    var onQueued: (suspend (Long) -> Unit)? = null
+
     suspend fun dequeue(articleId: Long) = queueDao.remove(articleId)
+
+    /** Restores a queue order, e.g. to undo taking an episode out. Episodes not in [ids] are dropped. */
+    suspend fun setQueueOrder(ids: List<Long>) = db.withTransaction {
+        queueDao.clear()
+        ids.forEachIndexed { i, id -> if (articleDao.byId(id) != null) queueDao.put(QueueEntry(id, i.toLong())) }
+    }
 
     /** Swaps the episode with its neighbour above ([up]) or below. */
     suspend fun moveInQueue(articleId: Long, up: Boolean) = db.withTransaction {
@@ -361,10 +387,11 @@ class Repository(
         ids.forEachIndexed { i, id -> queueDao.setPosition(id, i.toLong()) }
     }
 
-    /** Takes the next episode out of the queue; null if it is empty. */
-    suspend fun takeNextInQueue(): Long? = db.withTransaction {
-        queueDao.ids().firstOrNull()?.also { queueDao.remove(it) }
-    }
+    /**
+     * The episode to play after [currentId]: the first one in the queue other than it. The queue
+     * keeps the playing episode until it is played to the end.
+     */
+    suspend fun nextInQueue(currentId: Long?): Long? = queueDao.ids().firstOrNull { it != currentId }
 
     // ---- Statistics -------------------------------------------------------------------------
 

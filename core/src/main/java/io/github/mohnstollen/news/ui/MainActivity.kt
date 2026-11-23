@@ -61,6 +61,7 @@ import io.github.mohnstollen.news.AppFeatures
 import io.github.mohnstollen.news.NewsApp
 import io.github.mohnstollen.news.playback.PlayerConnection
 import io.github.mohnstollen.news.widget.NewsWidget
+import io.github.mohnstollen.news.widget.PlayerWidget
 import io.github.mohnstollen.news.widget.WidgetSource
 import io.github.mohnstollen.news.work.Notifier
 import kotlinx.coroutines.launch
@@ -86,6 +87,10 @@ class MainActivity : ComponentActivity() {
             requestedSource.value = WidgetSource.decode(it)
             intent.removeExtra(NewsWidget.EXTRA_SOURCE)
         }
+        if (intent?.getBooleanExtra(PlayerWidget.EXTRA_OPEN_PLAYER, false) == true) {
+            if (podcasts) player.sheetRequested.value = true
+            intent.removeExtra(PlayerWidget.EXTRA_OPEN_PLAYER)
+        }
         val id = intent?.getLongExtra(Notifier.EXTRA_ARTICLE_ID, -1L) ?: -1L
         if (id > 0) {
             requestedArticle.value = id
@@ -102,7 +107,11 @@ class MainActivity : ComponentActivity() {
     /** Reading changes what the widget should list. */
     override fun onStop() {
         super.onStop()
-        if (podcasts) player.release()
+        if (podcasts) {
+            player.release()
+            // Not left over for an episode played later.
+            player.sheetRequested.value = false
+        }
         val app = applicationContext
         container.repository.scope.launch { NewsWidget.updateAll(app) }
     }
@@ -169,6 +178,22 @@ class MainActivity : ComponentActivity() {
                         ReaderScreen(
                             onBack = { nav.popBackStack() },
                             onOpenArticle = { nav.navigate("reader/$it") },
+                            onOpenPodcast = if (tabs) ({ nav.navigate("podcast/$it") }) else null,
+                        )
+                    }
+                    composable("podcasts") {
+                        PodcastsScreen(
+                            onOpenPodcast = { nav.navigate("podcast/$it") },
+                            onOpenArticle = { nav.navigate("reader/$it") },
+                            onManage = { nav.navigate("feeds") },
+                            onDiscover = { nav.navigate("discover") },
+                        )
+                    }
+                    composable("podcast/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) { entry ->
+                        PodcastScreen(
+                            feedId = entry.arguments!!.getLong("id"),
+                            onBack = { nav.popBackStack() },
+                            onOpenArticle = { nav.navigate("reader/$it") },
                         )
                     }
                     composable("feeds") { FeedsScreen(onBack = { nav.popBackStack() }) }
@@ -176,11 +201,14 @@ class MainActivity : ComponentActivity() {
                         QueueScreen(onBack = backOrTab(), onOpenArticle = { nav.navigate("reader/$it") })
                     }
                     composable("downloads") {
-                        DownloadsScreen(onBack = backOrTab(), onOpenArticle = { nav.navigate("reader/$it") })
+                        DownloadsScreen(onBack = { nav.popBackStack() }, onOpenArticle = { nav.navigate("reader/$it") })
                     }
                     composable("stats") { StatsScreen(onBack = { nav.popBackStack() }) }
                     composable("discover") { DiscoverScreen(onBack = { nav.popBackStack() }) }
-                    composable("settings") { SettingsScreen(onBack = backOrTab()) }
+                    // Opened from "Mehr" with tabs, so it has a back arrow either way.
+                    composable("settings") {
+                        SettingsScreen(onBack = { nav.popBackStack() }, onOpenDownloads = { nav.navigate("downloads") })
+                    }
                 }
                 }
               }
@@ -208,10 +236,9 @@ private fun TabScaffold(
     }
     val tabs = remember {
         listOf(
-            Tab("list", "Podcasts", Icons.AutoMirrored.Filled.List),
+            Tab("list", "Neu", AppIcons.Inbox),
             Tab("queue", "Warteschlange", AppIcons.QueueAdd),
-            Tab("downloads", "Downloads", AppIcons.Download),
-            Tab("settings", "Einstellungen", Icons.Default.Settings),
+            Tab("podcasts", "Podcasts", AppIcons.Grid),
         )
     }
     val entry by nav.currentBackStackEntryAsState()
@@ -234,7 +261,7 @@ private fun TabScaffold(
                         NavigationBarItem(
                             selected = route == tab.route,
                             onClick = {
-                                // Tapping "Podcasts" again leads back from Gemerkt or Archiv to all episodes.
+                                // Tapping "Neu" again leads back from Gemerkt or Archiv to the new episodes.
                                 if (tab.route == "list" && route == "list") onShowScope(MainViewModel.ListScope.All)
                                 go(tab.route)
                             },
@@ -250,6 +277,11 @@ private fun TabScaffold(
                             Box {
                                 Icon(Icons.Default.MoreVert, contentDescription = "Mehr")
                                 DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
+                                    DropdownMenuItem(
+                                        text = { Text("Einstellungen") },
+                                        leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                                        onClick = { moreOpen = false; nav.navigate("settings") },
+                                    )
                                     DropdownMenuItem(
                                         text = { Text("Gemerkt") },
                                         leadingIcon = { Icon(Icons.Default.Star, contentDescription = null) },
@@ -420,6 +452,20 @@ object AppIcons {
     /** List with a minus: take out of the queue. */
     val QueueRemove: ImageVector by lazy {
         icon("QueueRemove", "M14,10H3v2h11V10zM14,6H3v2h11V6zM3,16h7v-2H3V16zM12,14v2h10v-2H12z")
+    }
+
+    /** Tray: the inbox of new episodes. */
+    val Inbox: ImageVector by lazy {
+        icon(
+            "Inbox",
+            "M19,3H4.99C3.88,3 3.01,3.89 3.01,5L3,19c0,1.1 0.88,2 1.99,2H19c1.1,0 2,-0.9 2,-2V5c0,-1.11 -0.9,-2 -2,-2z" +
+                "M19,15h-4c0,1.66 -1.35,3 -3,3s-3,-1.34 -3,-3H4.99V5H19v10z",
+        )
+    }
+
+    /** Four squares: the podcasts as a grid of covers. */
+    val Grid: ImageVector by lazy {
+        icon("Grid", "M3,3h8v8H3V3zM13,3h8v8h-8V3zM3,13h8v8H3v-8zM13,13h8v8h-8v-8z")
     }
 
     /** Bar chart: statistics. */

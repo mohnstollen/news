@@ -58,6 +58,9 @@ class PlayerConnection(context: Context) {
     val sleepTimer = context.container.sleepTimer
     val queue = repo.queueDao.observe()
 
+    /** The full player should open, e.g. after a tap on the widget; the mini player does it. */
+    val sheetRequested = MutableStateFlow(false)
+
     private val _state = MutableStateFlow(PlayerState())
     val state: StateFlow<PlayerState> = _state
 
@@ -128,10 +131,10 @@ class PlayerConnection(context: Context) {
 
     fun pause() = command { it.pause() }
 
-    /** Skips to the first episode of the queue; the current one keeps its position. */
+    /** Skips to the next episode of the queue; the current one keeps its place and position. */
     fun playNext() {
         main.launch {
-            val next = repo.takeNextInQueue() ?: return@launch
+            val next = repo.nextInQueue(_state.value.articleId) ?: return@launch
             play(next)
         }
     }

@@ -164,4 +164,30 @@ class DownloadsTest {
         assertEquals("7.ogg", downloads.fileFor(7, "https://cdn.example.org/stream", "audio/ogg").name)
         assertEquals("7.mp4", downloads.fileFor(7, "https://cdn.example.org/play?id=3", "video/mp4").name)
     }
+
+    @Test
+    fun downloadingQueuesAndQueuingDownloads() {
+        val workManager = androidx.work.WorkManager.getInstance(context)
+        fun downloading(id: Long) = workManager.getWorkInfosForUniqueWork("download-$id").get().any { !it.state.isFinished }
+
+        // Downloading an episode puts it into the queue.
+        val a = episode("q1")
+        runBlocking { downloads.download(listOf(a)) }
+        assertEquals(listOf(a), runBlocking { repo.queueDao.ids() })
+        assertTrue(downloading(a))
+
+        // Queuing an episode downloads it.
+        val b = episode("q2")
+        runBlocking { repo.enqueue(b) }
+        assertTrue(downloading(b))
+
+        // Both can be switched off.
+        context.container.settings.update { it.copy(downloadEnqueues = false, queueDownloads = false) }
+        val c = episode("q3")
+        runBlocking { downloads.download(listOf(c)) }
+        assertTrue(c !in runBlocking { repo.queueDao.ids() })
+        val e = episode("q4")
+        runBlocking { repo.enqueue(e) }
+        assertFalse(downloading(e))
+    }
 }

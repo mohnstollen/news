@@ -8,6 +8,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,6 +20,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
@@ -116,7 +119,9 @@ class ReaderViewModel(app: Application, handle: SavedStateHandle) : AndroidViewM
         }
     }
 
-    fun download() = downloads.enqueue(listOf(id))
+    fun download() {
+        viewModelScope.launch { downloads.download(listOf(id)) }
+    }
 
     fun cancelDownload() = downloads.cancel(id)
 
@@ -165,7 +170,12 @@ class ReaderViewModel(app: Application, handle: SavedStateHandle) : AndroidViewM
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReaderScreen(onBack: () -> Unit, onOpenArticle: (Long) -> Unit, vm: ReaderViewModel = viewModel()) {
+fun ReaderScreen(
+    onBack: () -> Unit,
+    onOpenArticle: (Long) -> Unit,
+    onOpenPodcast: ((Long) -> Unit)? = null,
+    vm: ReaderViewModel = viewModel(),
+) {
     val article by vm.article.collectAsStateWithLifecycle()
     val feed by vm.feed.collectAsStateWithLifecycle()
     val loading by vm.loadingFullText.collectAsStateWithLifecycle()
@@ -256,6 +266,24 @@ fun ReaderScreen(onBack: () -> Unit, onOpenArticle: (Long) -> Unit, vm: ReaderVi
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
+          val f = feed
+          if (a?.enclosureUrl != null && f != null && onOpenPodcast != null) {
+              // To the podcast's overview: more of its episodes, its settings, unsubscribing.
+              Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  modifier = Modifier.fillMaxWidth()
+                      .clickable(onClickLabel = "Übersicht des Podcasts öffnen") { onOpenPodcast(f.id) }
+                      .padding(horizontal = 16.dp, vertical = 8.dp),
+              ) {
+                  Cover(a.imageUrl ?: f.imageUrl, f.title, 40.dp)
+                  Spacer(Modifier.width(12.dp))
+                  Column(Modifier.weight(1f)) {
+                      Text(f.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                      Text("Alle Folgen des Podcasts", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                  }
+                  Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
+              }
+          }
           if (a?.enclosureUrl != null && context.features.podcasts) {
               val download by vm.download.collectAsStateWithLifecycle()
               EpisodePanel(a, download, vm)

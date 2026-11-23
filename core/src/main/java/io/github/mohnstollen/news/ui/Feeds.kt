@@ -390,7 +390,7 @@ private fun AddFeedDialog(
 }
 
 @Composable
-private fun EditFeedDialog(
+internal fun EditFeedDialog(
     feed: Feed,
     folders: List<String>,
     onSave: suspend (
