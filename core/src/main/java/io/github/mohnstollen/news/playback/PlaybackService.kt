@@ -48,6 +48,8 @@ import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Plays podcast episodes in the background. The media session gives the system notification,
@@ -67,6 +69,10 @@ class PlaybackService : MediaLibraryService() {
      */
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private val writes = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+    /** One thread alone does not keep the order once a write waits for a transaction; this lock (fair) does. */
+    private val writeLock = Mutex()
+
+    private fun write(block: suspend () -> Unit) = writes.launch { writeLock.withLock { block() } }
     private var saveJob: Job? = null
     private var sleepJob: Job? = null
     private var endBufferJob: Job? = null
@@ -385,7 +391,7 @@ class PlaybackService : MediaLibraryService() {
         override fun onTracksChanged(tracks: Tracks) {
             val id = currentArticleId() ?: return
             val chapters = id3Chapters(tracks).takeIf { it.isNotEmpty() } ?: return
-            writes.launch { repo.articleDao.setChaptersIfMissing(id, Chapters.encode(chapters)) }
+            write { repo.articleDao.setChaptersIfMissing(id, Chapters.encode(chapters)) }
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -410,13 +416,13 @@ class PlaybackService : MediaLibraryService() {
             val timer = container.sleepTimer
             val stopHere = timer.mode.value == SleepTimer.Mode.EndOfEpisode
             if (stopHere) timer.cancel()
-            writes.launch {
+            write {
                 repo.setPlayed(id, true)
                 repo.logListening(id, 0, 0, finished = true)
                 downloads.onPlayed(id)
-                if (stopHere) return@launch
+                if (stopHere) return@write
                 // setPlayed took the finished episode out of the queue.
-                val next = repo.nextInQueue(id) ?: return@launch
+                val next = repo.nextInQueue(id) ?: return@write
                 withContext(Dispatchers.Main) { playFromQueue(next) }
             }
         }
@@ -432,6 +438,7 @@ class PlaybackService : MediaLibraryService() {
     /** Podcasting 2.0: the feed links a JSON file with the chapters; loaded once, when played. */
     private fun loadLinkedChapters(articleId: Long) {
         val http = container.http
+        // Not in line with the other writes: it waits for the network.
         writes.launch {
             val article = repo.articleDao.byId(articleId) ?: return@launch
             val url = article.chaptersUrl ?: return@launch
@@ -468,7 +475,7 @@ class PlaybackService : MediaLibraryService() {
         val player = session?.player ?: return
         val id = currentArticleId() ?: return
         val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: return
-        writes.launch { repo.articleDao.learnDuration(id, duration / 1000) }
+        write { repo.articleDao.learnDuration(id, duration / 1000) }
     }
 
     private fun endBufferMs(): Long = container.settings.current.endBufferSeconds * 1000L
@@ -500,7 +507,7 @@ class PlaybackService : MediaLibraryService() {
         listeningSince = now
         if (listened <= 0) return
         val content = (listened * player.playbackParameters.speed).toLong()
-        writes.launch { repo.logListening(id, listened, content) }
+        write { repo.logListening(id, listened, content) }
     }
 
     private fun currentArticleId(): Long? = session?.player?.currentMediaItem?.mediaId?.toLongOrNull()
@@ -511,7 +518,7 @@ class PlaybackService : MediaLibraryService() {
         val id = currentArticleId() ?: return
         if (player.playbackState == Player.STATE_ENDED) return
         val position = player.currentPosition
-        writes.launch { repo.savePlayPosition(id, position) }
+        write { repo.savePlayPosition(id, position) }
     }
 
     /** A missing or forbidden file does not come back by asking again; network trouble may pass. */
