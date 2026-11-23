@@ -13,7 +13,7 @@ Beide lassen sich nebeneinander installieren und haben getrennte Daten.
 |---|---|
 | `core` | Gemeinsamer Kern: Feeds, Datenbank, Nextcloud-Sync, OPML, Bildschirme, Wiedergabe |
 | `app` | **News**: Paket `io.github.mohnstollen.news`, ohne Podcast-Funktionen, mit Widget |
-| `podfang` | **Podfang**: Paket `io.github.mohnstollen.podfang`, eigenes Symbol, ohne Widget |
+| `podfang` | **Podfang**: Paket `io.github.mohnstollen.podfang`, eigenes Symbol, Player-Widget |
 
 Was die Apps unterscheidet, steht in `core/…/AppFeatures.kt`: ob Podcast-Funktionen da sind,
 einige Bezeichnungen („Alle Artikel“ / „Alle Folgen“) und der Nextcloud-Ordner. Die
@@ -72,8 +72,13 @@ sie nicht brauchen.
   (0,8× bis 2×, auch direkt in der Folge umschaltbar), 10 s zurück / 30 s vor, Steuerung über
   Benachrichtigung, Sperrbildschirm, Kopfhörer und Bluetooth. Auf dem Sperrbildschirm und in der
   Benachrichtigung: vorherige/nächste Folge (aus der Warteschlange), 10 s zurück und 30 s vor; welches
-  Paar neben Play liegt, ist einstellbar (manche Handys zeigen dort nur zwei Knöpfe) Jede Folge merkt sich, wo sie aufgehört
-  hat; zu Ende gehörte Folgen gelten als gelesen
+  Paar neben Play liegt, ist einstellbar (manche Handys zeigen dort nur zwei Knöpfe). Jede Folge merkt
+  sich, wo sie aufgehört hat; zu Ende gehörte Folgen gelten als gelesen
+- **Widget** für den Startbildschirm, ein Widget für alle Größen: ab 2×1 Cover, Folge und Play/Pause,
+  ab 4×1 zusätzlich 10 s zurück, 30 s vor und nächste Folge, ab 4×2 die nächsten drei Folgen der
+  Warteschlange. Zeigt die laufende Folge mit verbleibender Zeit (läuft beim Abspielen mit) oder, wenn
+  nichts geladen ist, die erste der Warteschlange; Play startet sie. Cover oder Titel öffnen den Player,
+  eine Folge der Liste ihre Seite
 - **Downloads**: Folgen pro Stück herunterladen (Knopf in der Folge) oder pro Podcast automatisch nach
   jedem Update, einstellbar schon beim Abonnieren oder später unter Podcasts verwalten → Podcast
   antippen. Standardmäßig nur im WLAN; unterbrochene Downloads laufen weiter, wo sie aufgehört haben.
@@ -95,7 +100,7 @@ sie nicht brauchen.
   oder einen ausgewählten Podcast. Ein Tipp auf einen Podcast zeigt die letzten Folgen und wie oft er
   erscheint. Fragt den Katalog nur auf Knopfdruck; dabei gehen Podcast-Namen und Stichwörter an Apple,
   ohne Konto
-- Spricht von Folgen und Podcasts statt von Artikeln und Feeds; kein Volltext, kein Widget
+- Spricht von Folgen und Podcasts statt von Artikeln und Feeds; kein Volltext, kein Artikel-Widget
 
 ## Bauen
 
@@ -160,6 +165,6 @@ Pfade relativ zu `core/src/main/java/io/github/mohnstollen/news/`.
 | `data/Repository.kt` | Aktualisieren, Abonnements, Artikelstatus |
 | `work/RefreshWorker.kt` | Hintergrund-Aktualisierung mit WorkManager |
 | `work/Notifier.kt` | Benachrichtigung über neue Artikel |
-| `widget/` | Startbildschirm-Widget mit Auswahl pro Widget |
+| `widget/` | Startbildschirm-Widgets: Artikel mit Auswahl pro Widget (News), Player (Podfang) |
 | `ui/QrScanner.kt` | Kamera-Ansicht für den QR-Code |
 | `ui/` | Oberfläche: Artikelliste, Leseansicht, Feeds, Einstellungen |

@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -103,6 +104,14 @@ fun MiniPlayer(onOpenArticle: ((Long) -> Unit)?) {
     val state = playerState()
     val id = state.articleId ?: return
     var sheetOpen by rememberSaveable { mutableStateOf(false) }
+    // Asked for from outside, e.g. by a tap on the widget's cover.
+    val requested by player.sheetRequested.collectAsStateWithLifecycle()
+    LaunchedEffect(requested) {
+        if (requested) {
+            sheetOpen = true
+            player.sheetRequested.value = false
+        }
+    }
 
     Surface(tonalElevation = 3.dp, shadowElevation = 3.dp) {
         Column(Modifier.windowInsetsPadding(WindowInsets.navigationBars)) {

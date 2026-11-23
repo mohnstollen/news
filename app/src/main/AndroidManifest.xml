@@ -13,5 +13,6 @@
 
         <service android:name="io.github.mohnstollen.news.playback.PlaybackService" tools:node="remove" />
         <service android:name="androidx.work.impl.foreground.SystemForegroundService" tools:node="remove" />
+        <receiver android:name="io.github.mohnstollen.news.widget.PlayerWidgetProvider" tools:node="remove" />
     </application>
 </manifest>

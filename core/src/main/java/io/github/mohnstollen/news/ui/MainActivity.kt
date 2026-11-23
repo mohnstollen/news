@@ -61,6 +61,7 @@ import io.github.mohnstollen.news.AppFeatures
 import io.github.mohnstollen.news.NewsApp
 import io.github.mohnstollen.news.playback.PlayerConnection
 import io.github.mohnstollen.news.widget.NewsWidget
+import io.github.mohnstollen.news.widget.PlayerWidget
 import io.github.mohnstollen.news.widget.WidgetSource
 import io.github.mohnstollen.news.work.Notifier
 import kotlinx.coroutines.launch
@@ -86,6 +87,10 @@ class MainActivity : ComponentActivity() {
             requestedSource.value = WidgetSource.decode(it)
             intent.removeExtra(NewsWidget.EXTRA_SOURCE)
         }
+        if (intent?.getBooleanExtra(PlayerWidget.EXTRA_OPEN_PLAYER, false) == true) {
+            if (podcasts) player.sheetRequested.value = true
+            intent.removeExtra(PlayerWidget.EXTRA_OPEN_PLAYER)
+        }
         val id = intent?.getLongExtra(Notifier.EXTRA_ARTICLE_ID, -1L) ?: -1L
         if (id > 0) {
             requestedArticle.value = id
@@ -102,7 +107,11 @@ class MainActivity : ComponentActivity() {
     /** Reading changes what the widget should list. */
     override fun onStop() {
         super.onStop()
-        if (podcasts) player.release()
+        if (podcasts) {
+            player.release()
+            // Not left over for an episode played later.
+            player.sheetRequested.value = false
+        }
         val app = applicationContext
         container.repository.scope.launch { NewsWidget.updateAll(app) }
     }

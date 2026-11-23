@@ -123,19 +123,7 @@ class PlaybackServiceTest {
         assertTrue(player.playWhenReady)
     }
 
-    /** Silence as a WAV file (half a second by default), which the player can play without a decoder. */
-    private fun silence(name: String, seconds: Double = 0.5): java.io.File {
-        val rate = 4000
-        val samples = (rate * seconds).toInt()
-        val data = ByteArray(samples * 2)
-        val header = java.nio.ByteBuffer.allocate(44).order(java.nio.ByteOrder.LITTLE_ENDIAN).apply {
-            put("RIFF".toByteArray()); putInt(36 + data.size); put("WAVE".toByteArray())
-            put("fmt ".toByteArray()); putInt(16); putShort(1); putShort(1); putInt(rate); putInt(rate * 2)
-            putShort(2); putShort(16)
-            put("data".toByteArray()); putInt(data.size)
-        }.array()
-        return java.io.File(context.filesDir, name).apply { writeBytes(header + data) }
-    }
+    private fun silence(name: String, seconds: Double = 0.5) = silenceFile(context, name, seconds)
 
     @Test
     fun theNextQueuedEpisodeFollowsAndListeningIsCounted() {

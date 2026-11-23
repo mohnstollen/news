@@ -198,6 +198,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        container.playerWidget.nowPlaying.value = null
         savePosition()
         logListening()
         session?.run {
@@ -273,6 +274,11 @@ class PlaybackService : MediaSessionService() {
     }
 
     private val listener = object : Player.Listener {
+        /** What the widget shows follows playback; not every event changes that. */
+        override fun onEvents(player: Player, events: Player.Events) {
+            if (events.containsAny(*WIDGET_EVENTS)) container.playerWidget.nowPlaying.value = NowPlaying.of(player)
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             saveJob?.cancel()
             endBufferJob?.cancel()
@@ -447,5 +453,15 @@ class PlaybackService : MediaSessionService() {
         /** "Previous" within this time of an episode's start goes to the episode before. */
         const val RESTART_WINDOW_MS = 5_000L
         private const val HISTORY_SIZE = 20
+        private val WIDGET_EVENTS = intArrayOf(
+            Player.EVENT_IS_PLAYING_CHANGED,
+            Player.EVENT_PLAY_WHEN_READY_CHANGED,
+            Player.EVENT_PLAYBACK_STATE_CHANGED,
+            Player.EVENT_MEDIA_ITEM_TRANSITION,
+            Player.EVENT_MEDIA_METADATA_CHANGED,
+            Player.EVENT_POSITION_DISCONTINUITY,
+            Player.EVENT_PLAYBACK_PARAMETERS_CHANGED,
+            Player.EVENT_TIMELINE_CHANGED,
+        )
     }
 }

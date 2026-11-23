@@ -58,6 +58,9 @@ class PlayerConnection(context: Context) {
     val sleepTimer = context.container.sleepTimer
     val queue = repo.queueDao.observe()
 
+    /** The full player should open, e.g. after a tap on the widget; the mini player does it. */
+    val sheetRequested = MutableStateFlow(false)
+
     private val _state = MutableStateFlow(PlayerState())
     val state: StateFlow<PlayerState> = _state
 
