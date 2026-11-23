@@ -23,6 +23,9 @@ data class AppFeatures(
     /** The app's word for something: [news] in News, [podcast] in Podfang. */
     fun pick(news: String, podcast: String): String = if (podcastWords) podcast else news
 
+    /** Its releases on GitHub are tagged "<releasePrefix>-v1.2". */
+    val releasePrefix: String get() = appName.lowercase()
+
     /** Name the app gives itself towards Nextcloud, e.g. for the app password. */
     val clientName: String get() = "$appName (Android)"
 

@@ -78,6 +78,9 @@ import io.github.mohnstollen.news.data.ReadVisibility
 import io.github.mohnstollen.news.work.RefreshWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import android.content.Intent
+import io.github.mohnstollen.news.data.UpdateChecker
+import io.github.mohnstollen.news.work.AppUpdates
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -233,7 +236,72 @@ fun SettingsScreen(onBack: (() -> Unit)?, onOpenDownloads: (() -> Unit)? = null)
                     )
                 }
             }
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            SectionTitle("App")
+            UpdateSection(prefs = prefs, onChange = settings::update)
             Spacer(Modifier.height(32.dp))
+        }
+    }
+}
+
+/** The installed version, the daily update check and a check on request. */
+@Composable
+private fun UpdateSection(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val installed = remember { AppUpdates.installedVersion(context) }
+    var checking by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    val available = prefs.updateVersion?.takeIf { UpdateChecker.isNewer(it, installed) }
+
+    Text(
+        "${context.features.appName} $installed",
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+    )
+    SwitchRow(
+        title = "Nach Updates suchen",
+        subtitle = "Einmal am Tag in der öffentlichen Release-Liste auf GitHub nachsehen, ohne Konto. " +
+            "Eine neue Version wird per Benachrichtigung gemeldet.",
+        checked = prefs.updateCheck,
+        onChange = { value -> onChange { it.copy(updateCheck = value) } },
+    )
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(horizontal = 8.dp),
+    ) {
+        TextButton(
+            enabled = !checking,
+            onClick = {
+                checking = true
+                message = null
+                scope.launch {
+                    message = try {
+                        if (AppUpdates.check(context) == null) "Das ist die neueste Version." else null
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        "Prüfen fehlgeschlagen: ${e.message ?: e.javaClass.simpleName}"
+                    } finally {
+                        checking = false
+                    }
+                }
+            },
+        ) { Text("Jetzt prüfen") }
+        if (checking) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        message?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+    if (available != null) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        ) {
+            Text("Version $available ist verfügbar.", modifier = Modifier.weight(1f))
+            Button(onClick = {
+                val url = prefs.updateUrl ?: return@Button
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }) { Text("Herunterladen") }
         }
     }
 }

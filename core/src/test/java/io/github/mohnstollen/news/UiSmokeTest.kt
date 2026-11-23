@@ -821,6 +821,7 @@ class PodfangModeUiTest : UiTestBase() {
         waitFor("Intervall in Minuten")
         compose.onNodeWithText("Folgen der Warteschlange laden").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Hörstand mit gPodder Sync abgleichen").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Nach Updates suchen").performScrollTo().assertIsDisplayed()
         assertTrue(compose.onAllNodesWithText("Widget").fetchSemanticsNodes().isEmpty())
         assertEquals("own Nextcloud folder", "Podfang", context.container.settings.current.ncFolder)
         assertEquals("Podfang (Android)", context.container.features.clientName)

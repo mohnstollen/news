@@ -14,6 +14,7 @@ import io.github.mohnstollen.news.data.Recommender
 import io.github.mohnstollen.news.data.Repository
 import io.github.mohnstollen.news.data.SettingsStore
 import io.github.mohnstollen.news.data.SyncManager
+import io.github.mohnstollen.news.data.UpdateChecker
 import io.github.mohnstollen.news.data.newHttpClient
 import io.github.mohnstollen.news.playback.Downloads
 import io.github.mohnstollen.news.playback.SleepTimer
@@ -37,6 +38,7 @@ class AppContainer(app: Application, val features: AppFeatures) {
     val sleepTimer = SleepTimer()
     val recommender = Recommender(http, repository)
     val playerWidget = PlayerWidgetUpdater(app, repository, settings)
+    val updates = UpdateChecker(http)
 
     init {
         if (features.podcasts) {

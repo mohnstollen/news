@@ -35,6 +35,8 @@ class RefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         val result = container.repository.refreshAll()
         NewsWidget.updateAll(applicationContext)
         runCatching { container.downloads.cleanUp() }
+        // Once a day: is there a newer version of the app?
+        AppUpdates.checkInBackground(applicationContext)
         val manual = inputData.getBoolean(KEY_MANUAL, false)
         if (!manual && prefs.notifyNewArticles && result.notifyIds.isNotEmpty()) {
             val podcasts = container.features.podcasts

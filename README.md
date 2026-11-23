@@ -137,6 +137,28 @@ Die APKs liegen danach unter `app/build/outputs/apk/debug/app-debug.apk` (News) 
 ./gradlew :core:testDebugUnitTest
 ```
 
+## Releases und Updates
+
+Jede App hat ihre Version an einer Stelle: `appVersion` in `app/build.gradle.kts` (News) bzw.
+`podfang/build.gradle.kts` (Podfang); der Versionscode folgt daraus (1.2.3 → 10203). Für ein Release:
+
+1. `appVersion` erhöhen und committen.
+2. Den Tag `news-v<Version>` bzw. `podfang-v<Version>` setzen und pushen, z. B.
+   `git tag podfang-v1.1 && git push origin podfang-v1.1`.
+
+Der Workflow `.github/workflows/release.yml` prüft, dass Tag und `appVersion` übereinstimmen, lässt die
+Tests laufen, baut die signierte Release-APK und veröffentlicht sie als GitHub-Release
+(`podfang-1.1.apk`). Dafür braucht das Repository unter **Settings → Secrets and variables → Actions**
+das Secret `RELEASE_KEYSTORE_BASE64` (der Signierschlüssel, base64-kodiert); `RELEASE_STORE_PASSWORD`,
+`RELEASE_KEY_ALIAS` und `RELEASE_KEY_PASSWORD` sind optional. Updates lassen sich nur mit demselben
+Schlüssel über eine installierte App installieren, also gut aufbewahren. Lokal signiert ein Release-Build,
+wenn `RELEASE_KEYSTORE` auf die Schlüsseldatei zeigt; sonst bleibt er unsigniert.
+
+**Update-Check in den Apps**: Einmal am Tag (beim Hintergrund-Update) sehen die Apps in der öffentlichen
+Release-Liste auf GitHub nach, ob es eine neuere Version mit ihrem Tag gibt, und melden sie einmal per
+Benachrichtigung; ein Tipp lädt die APK herunter. Unter Einstellungen → App stehen die installierte
+Version, „Jetzt prüfen“ und der Schalter zum Abschalten.
+
 ## Nextcloud-Synchronisation
 
 In der App unter **Einstellungen → Nextcloud-Synchronisation** einer von drei Wegen:
