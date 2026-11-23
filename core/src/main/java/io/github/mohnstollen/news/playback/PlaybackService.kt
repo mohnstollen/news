@@ -145,6 +145,21 @@ class PlaybackService : MediaLibraryService() {
 
     private fun seekMain() = container.settings.current.lockScreenSeek
 
+    /** The podcast whose own speed is in effect; null while the app's speed is. */
+    private var speedOwner: Long? = null
+
+    /** Each podcast plays at its own speed if it has one, else at the app's. */
+    private fun applySpeed(articleId: Long?) {
+        main.launch {
+            val feed = articleId?.let { repo.articleDao.byId(it) }?.let { repo.feedDao.byId(it.feedId) }
+            val own = feed?.playbackSpeed
+            speedOwner = feed?.id?.takeIf { own != null }
+            val speed = own ?: container.settings.current.playbackSpeed
+            val player = session?.player ?: return@launch
+            if (player.playbackParameters.speed != speed) player.setPlaybackSpeed(speed)
+        }
+    }
+
     /** Episodes played before the current one, the latest last; for "previous episode". */
     private val history = ArrayDeque<Long>()
     private var lastArticleId: Long? = null
@@ -397,6 +412,7 @@ class PlaybackService : MediaLibraryService() {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             val now = mediaItem?.mediaId?.toLongOrNull()
             if (now != lastArticleId) {
+                applySpeed(now)
                 lastArticleId?.takeIf { !goingBack }?.let { history.addLast(it) }
                 while (history.size > HISTORY_SIZE) history.removeFirst()
                 goingBack = false
@@ -429,7 +445,11 @@ class PlaybackService : MediaLibraryService() {
 
         override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
             val speed = playbackParameters.speed
-            if (speed != container.settings.current.playbackSpeed) {
+            // A podcast with its own speed keeps the change for itself.
+            val owner = speedOwner
+            if (owner != null) {
+                write { repo.feedDao.setPlaybackSpeed(owner, speed) }
+            } else if (speed != container.settings.current.playbackSpeed) {
                 container.settings.update { it.copy(playbackSpeed = speed) }
             }
         }

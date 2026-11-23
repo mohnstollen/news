@@ -73,6 +73,9 @@ sie nicht brauchen.
   Statistik, Podcasts entdecken, Gemerkt, Archiv). Kein Seitenmenü
 - **Podcast-Übersicht**: Cover, Erscheinungsrhythmus und alle Folgen mit Abspielen, Herunterladen und
   Einreihen; Einstellungen des Podcasts und Abbestellen. Aus jeder Folge erreichbar
+- **Pro Podcast**: eigene Geschwindigkeit (eine Änderung im Player gilt dann nur für diesen Podcast) und
+  „Anfang überspringen“ (10 bis 90 Sekunden, für Intro oder Werbung; nur bei noch nicht begonnenen
+  Folgen). Unter den Einstellungen des Podcasts in seiner Übersicht
 - **Cover**: in den Listen als Vorschaubild, groß im Player und klein im Mini-Player; zwischengespeichert,
   also auch offline sichtbar
 - **Kapitel** im Player: aus dem Feed (Podlove Simple Chapters), aus einer verlinkten Kapiteldatei

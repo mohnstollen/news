@@ -339,4 +339,42 @@ class PlaybackServiceTest {
         assertEquals(a.toString(), player.currentMediaItem?.mediaId)
         controller.release()
     }
+
+    @Test
+    fun aPodcastPlaysAtItsOwnSpeedAndSkipsItsIntro() {
+        val (own, plain) = runBlocking {
+            val ownFeed = repo.feedDao.insert(Feed(url = "https://own.example/feed", title = "Schnell", playbackSpeed = 1.5f, skipIntroSeconds = 30))
+            val plainFeed = repo.feedDao.insert(Feed(url = "https://plain.example/feed", title = "Normal"))
+            fun episode(feedId: Long, guid: String) = Article(
+                feedId = feedId, guid = guid, title = "Folge $guid", pubDate = 0, fetchedAt = 0,
+                enclosureUrl = "https://cdn.example.org/$guid.wav", enclosureType = "audio/wav",
+                downloadPath = silence("$guid.wav", seconds = 100.0).path,
+            )
+            repo.articleDao.insertAll(listOf(episode(ownFeed, "own"), episode(plainFeed, "plain"))).let { it[0] to it[1] }
+        }
+        context.container.settings.update { it.copy(playbackSpeed = 1.2f) }
+        val service = startService()
+        val session = service.sessions.single()
+        val player = session.player
+        val future = MediaController.Builder(context, session.token).buildAsync()
+        waitFor("controller") { future.isDone }
+        val controller = future.get()
+
+        controller.setMediaItem(MediaItem.Builder().setMediaId(own.toString()).build())
+        waitFor("own speed") { player.playbackParameters.speed == 1.5f }
+        assertEquals("past the intro", 30_000L, player.currentPosition)
+
+        // Changed while it plays: kept for this podcast, not for the app.
+        controller.setPlaybackSpeed(1.8f)
+        waitFor("kept for the podcast") { runBlocking { repo.feedDao.byId(repo.articleDao.byId(own)!!.feedId)!!.playbackSpeed } == 1.8f }
+        assertEquals(1.2f, context.container.settings.current.playbackSpeed)
+
+        // Another podcast: the app's speed again, from the start.
+        controller.setMediaItem(MediaItem.Builder().setMediaId(plain.toString()).build())
+        waitFor("app's speed") { player.playbackParameters.speed == 1.2f && player.currentMediaItem?.mediaId == plain.toString() }
+        assertEquals(0L, player.currentPosition)
+        controller.setPlaybackSpeed(1f)
+        waitFor("app setting") { context.container.settings.current.playbackSpeed == 1f }
+        controller.release()
+    }
 }

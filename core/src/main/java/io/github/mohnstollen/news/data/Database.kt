@@ -40,6 +40,10 @@ data class Feed(
     val imageUrl: String? = null,
     /** Download new episodes of this feed after each update. */
     @ColumnInfo(defaultValue = "0") val autoDownload: Boolean = false,
+    /** Playback speed for this podcast's episodes; null: the app's speed. */
+    val playbackSpeed: Float? = null,
+    /** Seconds skipped at the start of an episode not begun yet (an intro); 0: none. */
+    @ColumnInfo(defaultValue = "0") val skipIntroSeconds: Int = 0,
 )
 
 @Entity(
@@ -405,6 +409,12 @@ interface FeedDao {
     @Query("UPDATE feeds SET autoDownload = :autoDownload WHERE id = :id")
     suspend fun setAutoDownload(id: Long, autoDownload: Boolean)
 
+    @Query("UPDATE feeds SET playbackSpeed = :speed, skipIntroSeconds = :skipIntroSeconds WHERE id = :id")
+    suspend fun setPlaybackOptions(id: Long, speed: Float?, skipIntroSeconds: Int)
+
+    @Query("UPDATE feeds SET playbackSpeed = :speed WHERE id = :id")
+    suspend fun setPlaybackSpeed(id: Long, speed: Float)
+
     @Query("UPDATE feeds SET etag = NULL, lastModified = NULL WHERE id = :id")
     suspend fun clearCacheHeaders(id: Long)
 
@@ -686,7 +696,7 @@ interface ArticleDao {
         Feed::class, Article::class, DeletedFeed::class, ArticleFts::class, QueueEntry::class, ListenEntry::class,
         PlayAction::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -775,8 +785,17 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Speed and intro to skip per podcast. */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE feeds ADD COLUMN playbackSpeed REAL")
+                db.execSQL("ALTER TABLE feeds ADD COLUMN skipIntroSeconds INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         val MIGRATIONS = arrayOf(
             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+            MIGRATION_8_9,
         )
     }
 }

@@ -206,6 +206,8 @@ fun PodcastScreen(feedId: Long, onBack: () -> Unit, onOpenArticle: (Long) -> Uni
                             Rhythm.describe(list.map { it.pubDate })?.let { "Erscheint $it" },
                             if (list.size == 1) "1 Folge" else "${list.size} Folgen",
                             "lädt neue Folgen".takeIf { f?.autoDownload == true },
+                            f?.playbackSpeed?.let { "immer ${speedLabel(it)}" },
+                            f?.skipIntroSeconds?.takeIf { it > 0 }?.let { "überspringt $it s am Anfang" },
                         )
                         Text(facts.joinToString(" · "), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
