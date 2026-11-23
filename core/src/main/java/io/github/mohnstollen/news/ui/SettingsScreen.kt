@@ -304,7 +304,11 @@ private fun NotificationRow(enabled: Boolean, autoUpdate: Boolean, onChange: (Bo
             enabled && !allowed || denied ->
                 "Android blockiert die Benachrichtigungen dieser App. Erlaube sie in den System-Einstellungen."
             else -> "Nach einem Hintergrund-Update. " +
-                w.pick("Einzelne Feeds lassen sich in der Feed-Verwaltung ausnehmen.", "Einzelne Podcasts lassen sich in der Podcast-Verwaltung ausnehmen.")
+                w.pick(
+                    "Einzelne Feeds lassen sich in der Feed-Verwaltung ausnehmen.",
+                    "Pro Podcast an- und abschaltbar mit der Glocke in seiner Übersicht. " +
+                        "Mit Knöpfen zum Abspielen und Einreihen.",
+                )
         },
         checked = enabled,
         enabled = autoUpdate,

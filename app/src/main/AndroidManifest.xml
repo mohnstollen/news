@@ -15,6 +15,7 @@
         <service android:name="androidx.work.impl.foreground.SystemForegroundService" tools:node="remove" />
         <receiver android:name="io.github.mohnstollen.news.widget.PlayerWidgetProvider" tools:node="remove" />
         <provider android:name="io.github.mohnstollen.news.playback.CoverProvider" tools:node="remove" />
+        <receiver android:name="io.github.mohnstollen.news.work.EpisodeActions" tools:node="remove" />
         <meta-data android:name="com.google.android.gms.car.application" tools:node="remove" />
     </application>
 </manifest>

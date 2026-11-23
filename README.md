@@ -48,6 +48,9 @@ sie nicht brauchen.
 
 ## Nur News
 
+- **Neue Folgen melden**: nach einem Hintergrund-Update, pro Podcast an- und abschaltbar mit der Glocke in
+  seiner Übersicht. Eine Folge mit Cover und den Knöpfen „Abspielen“ und „Einreihen“, mehrere mit
+  „Alle einreihen“ (älteste zuerst); Texteinträge ohne Audiodatei werden nicht gemeldet
 - **Android Auto**: Warteschlange, Neu und Podcasts (als Cover-Raster) zum Durchblättern, mit Cover,
   Restzeit und Hörfortschritt; Abspielen wie in der App (gespeicherte Stelle, oben in die Warteschlange),
   nächste/vorherige Folge, 10 s zurück und 30 s vor. Sprachbefehle („Spiele Lage der Nation auf
@@ -187,7 +190,7 @@ Pfade relativ zu `core/src/main/java/io/github/mohnstollen/news/`.
 | `data/NextcloudLogin.kt` | Anmeldung: Login Flow v2, Anmelde-QR-Code lesen und dekodieren |
 | `data/Repository.kt` | Aktualisieren, Abonnements, Artikelstatus |
 | `work/RefreshWorker.kt` | Hintergrund-Aktualisierung mit WorkManager |
-| `work/Notifier.kt` | Benachrichtigung über neue Artikel |
+| `work/Notifier.kt` | Benachrichtigung über neue Artikel bzw. Folgen, mit Knöpfen in Podfang |
 | `widget/` | Startbildschirm-Widgets: Artikel mit Auswahl pro Widget (News), Player (Podfang) |
 | `ui/QrScanner.kt` | Kamera-Ansicht für den QR-Code |
 | `ui/` | Oberfläche: Artikelliste, Leseansicht, Feeds, Einstellungen |

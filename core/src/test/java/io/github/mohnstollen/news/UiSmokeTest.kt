@@ -797,6 +797,10 @@ class PodfangModeUiTest : UiTestBase() {
         compose.onNodeWithText("Beispielfeed").performClick()
         waitFor("32 Folgen")
         compose.onNodeWithContentDescription("Podcast abbestellen").assertIsDisplayed()
+        // The bell: new episodes of this podcast announced, or not.
+        compose.onNodeWithContentDescription("Neue Folgen melden: an").performClick()
+        compose.waitUntil(5_000) { runBlocking { !repo.feedDao.all().first().notify } }
+        compose.onNodeWithContentDescription("Neue Folgen melden: aus").assertIsDisplayed()
         assertTrue("no tabs on a podcast", compose.onAllNodesWithContentDescription("Warteschlange", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
         screenshot("podfang-podcast")
 
@@ -817,6 +821,7 @@ class PodfangModeUiTest : UiTestBase() {
         compose.onNodeWithText("Einstellungen").performClick()
         waitFor("Intervall in Minuten")
         compose.onNodeWithText("Folgen der Warteschlange laden").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Hörstand mit gPodder Sync abgleichen").performScrollTo().assertIsDisplayed()
         assertTrue(compose.onAllNodesWithText("Widget").fetchSemanticsNodes().isEmpty())
         assertEquals("own Nextcloud folder", "Podfang", context.container.settings.current.ncFolder)
         assertEquals("Podfang (Android)", context.container.features.clientName)

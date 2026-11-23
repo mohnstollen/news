@@ -19,6 +19,9 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -157,6 +160,28 @@ fun PodcastScreen(feedId: Long, onBack: () -> Unit, onOpenArticle: (Long) -> Uni
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück") }
                 },
                 actions = {
+                    // New episodes of this podcast announced, or not.
+                    val notify = f?.notify == true
+                    IconButton(
+                        onClick = {
+                            val podcast = f ?: return@IconButton
+                            scope.launch { repo.feedDao.setNotify(podcast.id, !notify) }
+                            if (!notify && !container.settings.current.notifyNewArticles) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Benachrichtigungen sind in den Einstellungen noch aus",
+                                    android.widget.Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        },
+                        enabled = f != null,
+                    ) {
+                        Icon(
+                            if (notify) Icons.Filled.Notifications else Icons.Outlined.Notifications,
+                            contentDescription = if (notify) "Neue Folgen melden: an" else "Neue Folgen melden: aus",
+                            tint = if (notify) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                        )
+                    }
                     IconButton(onClick = { editOpen = true }, enabled = f != null) {
                         Icon(Icons.Default.Settings, contentDescription = "Einstellungen des Podcasts")
                     }

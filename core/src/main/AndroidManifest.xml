@@ -86,6 +86,11 @@
             </intent-filter>
         </service>
 
+        <!-- Buttons of the "new episodes" notification. -->
+        <receiver
+            android:name=".work.EpisodeActions"
+            android:exported="false" />
+
         <!-- Covers for Android Auto; the car gets read access per picture. -->
         <provider
             android:name=".playback.CoverProvider"
