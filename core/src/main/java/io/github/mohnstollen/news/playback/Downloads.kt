@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OutOfQuotaPolicy
+import android.net.ConnectivityManager
+import android.os.StatFs
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
@@ -74,8 +77,8 @@ class Downloads(context: Context, private val repo: Repository, private val sett
      * Downloads episodes the user (or a podcast's automatic downloads) asked for. If set, they go
      * into the queue too: who downloads an episode wants to hear it.
      */
-    suspend fun download(articleIds: Collection<Long>) {
-        enqueue(articleIds)
+    suspend fun download(articleIds: Collection<Long>, byUser: Boolean = true) {
+        enqueue(articleIds, urgent = byUser)
         if (settings.current.downloadEnqueues) articleIds.forEach { repo.enqueueIfAbsent(it) }
     }
 
@@ -84,17 +87,19 @@ class Downloads(context: Context, private val repo: Repository, private val sett
         if (!settings.current.queueDownloads) return
         val article = repo.articleDao.byId(articleId) ?: return
         if (article.enclosureUrl == null || article.downloadPath != null) return
-        enqueue(listOf(articleId))
+        enqueue(listOf(articleId), urgent = true)
     }
 
     /**
      * Queues downloads; already queued or running ones are left alone. [anyNetwork]: also over
-     * mobile data, whatever the setting says.
+     * mobile data, whatever the setting says. [urgent]: asked for by the user, so Android should
+     * start it right away instead of when it suits (expedited work, where its quota allows).
      */
     fun enqueue(
         articleIds: Collection<Long>,
         anyNetwork: Boolean = false,
         policy: ExistingWorkPolicy = ExistingWorkPolicy.KEEP,
+        urgent: Boolean = false,
     ) {
         val wifiOnly = settings.current.downloadWifiOnly && !anyNetwork
         val network = if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
@@ -107,6 +112,7 @@ class Downloads(context: Context, private val repo: Repository, private val sett
                 .apply {
                     if (wifiOnly) addTag(WIFI_TAG)
                     if (anyNetwork) addTag(ANY_NETWORK_TAG)
+                    if (urgent) setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 }
                 .build()
             workManager.enqueueUniqueWork(workName(id), policy, request)
@@ -117,7 +123,7 @@ class Downloads(context: Context, private val repo: Repository, private val sett
     suspend fun downloadNow(articleId: Long) = withContext(Dispatchers.IO) {
         val waiting = workManager.getWorkInfosForUniqueWork(workName(articleId)).get()
             .any { it.state == WorkInfo.State.ENQUEUED }
-        if (waiting) enqueue(listOf(articleId), anyNetwork = true, policy = ExistingWorkPolicy.REPLACE)
+        if (waiting) enqueue(listOf(articleId), anyNetwork = true, policy = ExistingWorkPolicy.REPLACE, urgent = true)
     }
 
     /**
@@ -134,7 +140,7 @@ class Downloads(context: Context, private val repo: Repository, private val sett
     /** Auto-download: of the new articles, those with a media file. */
     suspend fun enqueueNewEpisodes(articleIds: List<Long>) {
         val episodes = articleIds.filter { repo.articleDao.byId(it)?.enclosureUrl != null }
-        if (episodes.isNotEmpty()) download(episodes)
+        if (episodes.isNotEmpty()) download(episodes, byUser = false)
     }
 
     fun cancel(articleId: Long) {
@@ -190,6 +196,26 @@ class Downloads(context: Context, private val repo: Repository, private val sett
     private fun idFrom(info: WorkInfo): Long? =
         info.tags.firstOrNull { it.startsWith(ID_TAG_PREFIX) }?.removePrefix(ID_TAG_PREFIX)?.toLongOrNull()
 
+    /**
+     * What keeps waiting downloads from starting although a network is there, as Android sees it:
+     * background data on mobile networks blocked for the app (Data Saver, or the app's own data
+     * setting), or storage nearly full. Null if nothing is known to stand in the way.
+     */
+    fun blocker(): String? {
+        val connectivity = context.getSystemService(ConnectivityManager::class.java)
+        if (connectivity != null && connectivity.isActiveNetworkMetered &&
+            connectivity.restrictBackgroundStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED
+        ) {
+            return "Android sperrt mobile Daten im Hintergrund für diese App (Datensparmodus oder Datennutzung " +
+                "der App), deshalb starten Downloads über Mobilfunk nicht. Erlauben unter App-Info → Mobile Daten."
+        }
+        val free = runCatching { StatFs(dir.path).availableBytes }.getOrNull()
+        if (free != null && free < LOW_STORAGE_BYTES) {
+            return "Der Speicher ist fast voll; Android startet Downloads erst, wenn wieder Platz ist."
+        }
+        return null
+    }
+
     /** Number of downloaded episodes and their size in bytes. */
     suspend fun usage(): Pair<Int, Long> = withContext(Dispatchers.IO) {
         val rows = repo.articleDao.downloads()
@@ -213,6 +239,8 @@ class Downloads(context: Context, private val repo: Repository, private val sett
 
     companion object {
         const val TAG = "episode-download"
+        /** Below this, Android counts storage as low and holds downloads back (roughly). */
+        private const val LOW_STORAGE_BYTES = 500L * 1024 * 1024
         /** Waits for a network without volume limit. */
         private const val WIFI_TAG = "episode-download-wifi"
         /** Let over mobile data by hand. */

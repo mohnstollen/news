@@ -60,4 +60,25 @@ class DownloadTurnsTest {
         next.join()
         assertEquals(listOf(9L, 2L, 6L), order)
     }
+
+    @Test
+    fun aNewWorkerForTheSameEpisodeKeepsItsPlaceWhenTheOldOneStops() = runBlocking {
+        // The system stops a waiting worker and starts a new one for the same episode; the old one
+        // only leaves after the new one is in line. The new one must still get its turn.
+        val turns = DownloadTurns { ids -> ids.associateWith { 0 } }
+        val order = mutableListOf<String>()
+        val gate = CompletableDeferred<Unit>()
+        val running = launch { turns.run(9) { order += "9"; gate.await() } }
+        yield()
+        val old = launch { turns.run(1) { order += "old 1" } }
+        yield()
+        val new = launch { turns.run(1) { order += "new 1" } }
+        yield()
+        old.cancel()
+        yield()
+        gate.complete(Unit)
+        listOf(running, new).joinAll()
+        assertEquals(listOf("9", "new 1"), order)
+        assertEquals("nobody holds the turn afterwards", false, turns.busy())
+    }
 }

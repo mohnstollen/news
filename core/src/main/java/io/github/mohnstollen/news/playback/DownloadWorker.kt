@@ -121,6 +121,13 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
         }
     }
 
+    /** For an urgent (expedited) download on older Android versions, which run it as a foreground service. */
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        val id = inputData.getLong(KEY_ARTICLE, -1)
+        val title = container.repository.articleDao.byId(id)?.title.orEmpty()
+        return foregroundInfo(NOTIFICATION_BASE + (id % 100_000).toInt(), title, 0, 0)
+    }
+
     private fun foregroundInfo(notificationId: Int, title: String, bytes: Long, total: Long): ForegroundInfo {
         val manager = applicationContext.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
