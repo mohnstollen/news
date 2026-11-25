@@ -23,7 +23,18 @@ data class DownloadProgress(
     val bytes: Long = 0,
     /** 0 while unknown. */
     val total: Long = 0,
+    /** Why it is not running; null while it runs. */
+    val waiting: Waiting? = null,
 ) {
+    enum class Waiting {
+        /** Another download runs; this one is next or later. */
+        TURN,
+        /** "Downloads nur im WLAN" and there is none. */
+        WIFI,
+        /** No network yet, or a retry after an error. */
+        NETWORK,
+    }
+
     /** Between 0 and 1, or null while the size is unknown. */
     val fraction: Float? get() = if (total > 0) (bytes.toFloat() / total).coerceIn(0f, 1f) else null
 }
@@ -35,6 +46,12 @@ data class DownloadProgress(
 class Downloads(context: Context, private val repo: Repository, private val settings: SettingsStore) {
     private val context = context.applicationContext
     private val workManager get() = WorkManager.getInstance(context)
+
+    /** One download at a time, in the order of the queue; episodes not in it after those that are. */
+    val turns = DownloadTurns { ids ->
+        val queue = repo.queueDao.ids()
+        ids.associateWith { id -> queue.indexOf(id).takeIf { it >= 0 } ?: Int.MAX_VALUE }
+    }
 
     /** App-specific storage, removed with the app. External storage if there is some, else internal. */
     val dir: File
@@ -70,18 +87,48 @@ class Downloads(context: Context, private val repo: Repository, private val sett
         enqueue(listOf(articleId))
     }
 
-    /** Queues downloads; already queued or running ones are left alone. */
-    fun enqueue(articleIds: Collection<Long>) {
-        val network = if (settings.current.downloadWifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
+    /**
+     * Queues downloads; already queued or running ones are left alone. [anyNetwork]: also over
+     * mobile data, whatever the setting says.
+     */
+    fun enqueue(
+        articleIds: Collection<Long>,
+        anyNetwork: Boolean = false,
+        policy: ExistingWorkPolicy = ExistingWorkPolicy.KEEP,
+    ) {
+        val wifiOnly = settings.current.downloadWifiOnly && !anyNetwork
+        val network = if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
         for (id in articleIds) {
             val request = OneTimeWorkRequestBuilder<DownloadWorker>()
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(network).setRequiresStorageNotLow(true).build())
                 .setInputData(workDataOf(DownloadWorker.KEY_ARTICLE to id))
                 .addTag(TAG)
                 .addTag(idTag(id))
+                .apply {
+                    if (wifiOnly) addTag(WIFI_TAG)
+                    if (anyNetwork) addTag(ANY_NETWORK_TAG)
+                }
                 .build()
-            workManager.enqueueUniqueWork(workName(id), ExistingWorkPolicy.KEEP, request)
+            workManager.enqueueUniqueWork(workName(id), policy, request)
         }
+    }
+
+    /** A download waiting for Wi-Fi goes ahead over mobile data, just this one. */
+    suspend fun downloadNow(articleId: Long) = withContext(Dispatchers.IO) {
+        val waiting = workManager.getWorkInfosForUniqueWork(workName(articleId)).get()
+            .any { it.state == WorkInfo.State.ENQUEUED }
+        if (waiting) enqueue(listOf(articleId), anyNetwork = true, policy = ExistingWorkPolicy.REPLACE)
+    }
+
+    /**
+     * "Downloads nur im WLAN" was switched: downloads still waiting follow the new setting at
+     * once. Running ones go on; those let over mobile data by hand stay so.
+     */
+    suspend fun followNetworkSetting() = withContext(Dispatchers.IO) {
+        val ids = workManager.getWorkInfosByTag(TAG).get()
+            .filter { it.state == WorkInfo.State.ENQUEUED && ANY_NETWORK_TAG !in it.tags }
+            .mapNotNull(::idFrom)
+        enqueue(ids, policy = ExistingWorkPolicy.REPLACE)
     }
 
     /** Auto-download: of the new articles, those with a media file. */
@@ -120,10 +167,18 @@ class Downloads(context: Context, private val repo: Repository, private val sett
     val progress: Flow<Map<Long, DownloadProgress>> = workManager.getWorkInfosByTagFlow(TAG).map { infos ->
         infos.filter { !it.state.isFinished }.mapNotNull { info ->
             val id = idFrom(info) ?: return@mapNotNull null
+            val running = info.state == WorkInfo.State.RUNNING
+            val waiting = when {
+                running && info.progress.getBoolean(DownloadWorker.KEY_WAITING_TURN, false) -> DownloadProgress.Waiting.TURN
+                running -> null
+                WIFI_TAG in info.tags -> DownloadProgress.Waiting.WIFI
+                else -> DownloadProgress.Waiting.NETWORK
+            }
             id to DownloadProgress(
-                running = info.state == WorkInfo.State.RUNNING,
+                running = waiting == null,
                 bytes = info.progress.getLong(DownloadWorker.KEY_BYTES, 0),
                 total = info.progress.getLong(DownloadWorker.KEY_TOTAL, 0),
+                waiting = waiting,
             )
         }.toMap()
     }
@@ -158,6 +213,10 @@ class Downloads(context: Context, private val repo: Repository, private val sett
 
     companion object {
         const val TAG = "episode-download"
+        /** Waits for a network without volume limit. */
+        private const val WIFI_TAG = "episode-download-wifi"
+        /** Let over mobile data by hand. */
+        private const val ANY_NETWORK_TAG = "episode-download-any-network"
         private const val ID_TAG_PREFIX = "episode:"
         private fun idTag(id: Long) = "$ID_TAG_PREFIX$id"
         private fun workName(id: Long) = "download-$id"

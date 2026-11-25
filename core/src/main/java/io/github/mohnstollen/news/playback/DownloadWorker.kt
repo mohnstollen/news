@@ -12,6 +12,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import io.github.mohnstollen.news.NewsApp
 import io.github.mohnstollen.news.R
+import io.github.mohnstollen.news.data.Article
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -32,10 +33,21 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val repo = container.repository
         val downloads = container.downloads
         val article = repo.articleDao.byId(id) ?: return@withContext Result.success()
-        val url = article.enclosureUrl ?: return@withContext Result.success()
+        if (article.enclosureUrl == null) return@withContext Result.success()
         if (article.archivedAt > 0) return@withContext Result.success()
         if (article.downloadPath?.let { File(it).isFile } == true) return@withContext Result.success()
 
+        // One download after the other, the next episode of the queue first.
+        downloads.turns.run(id, onWait = { setProgress(workDataOf(KEY_WAITING_TURN to true)) }) {
+            setProgress(workDataOf(KEY_WAITING_TURN to false))
+            transfer(id, article)
+        }
+    }
+
+    private suspend fun transfer(id: Long, article: Article): Result {
+        val repo = container.repository
+        val downloads = container.downloads
+        val url = article.enclosureUrl ?: return Result.success()
         val target = downloads.fileFor(id, url, article.enclosureType)
         val part = File(target.path + ".part")
         val notificationId = NOTIFICATION_BASE + (id % 100_000).toInt()
@@ -49,18 +61,18 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
             // Continue without the notification.
         }
 
-        try {
+        return try {
             val offset = if (part.isFile) part.length() else 0L
             val request = Request.Builder().url(url).apply { if (offset > 0) header("Range", "bytes=$offset-") }.build()
             container.mediaHttp.newCall(request).execute().use { response ->
                 if (response.code == 416) {
                     // The partial file does not fit the file on the server any more: start over.
                     part.delete()
-                    return@withContext Result.retry()
+                    return Result.retry()
                 }
                 if (!response.isSuccessful) {
                     val permanent = response.code in 400..499
-                    return@withContext if (permanent || runAttemptCount >= MAX_ATTEMPTS) {
+                    return if (permanent || runAttemptCount >= MAX_ATTEMPTS) {
                         Result.failure(workDataOf(KEY_ERROR to "HTTP ${response.code}"))
                     } else Result.retry()
                 }
@@ -74,7 +86,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
                     body.byteStream().use { input ->
                         val buffer = ByteArray(64 * 1024)
                         while (true) {
-                            if (isStopped) return@withContext Result.retry()
+                            if (isStopped) return Result.retry()
                             val n = input.read(buffer)
                             if (n < 0) break
                             out.write(buffer, 0, n)
@@ -135,6 +147,8 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
         const val KEY_BYTES = "bytes"
         const val KEY_TOTAL = "total"
         const val KEY_ERROR = "error"
+        /** Progress: waiting for another download to finish. */
+        const val KEY_WAITING_TURN = "waitingTurn"
         private const val CHANNEL = "downloads"
         private const val NOTIFICATION_BASE = 10_000
         private const val MAX_ATTEMPTS = 4

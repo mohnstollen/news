@@ -109,6 +109,11 @@ sie nicht brauchen.
   („später“), nach links wischen nimmt heraus (mit Rückgängig); Reihenfolge mit Pfeilen ändern.
   Die laufende Folge bleibt drin, bis sie zu Ende gehört ist.
   Längen, die der Feed nicht nennt, lernt die App beim Abspielen
+- **Downloads nacheinander**: eine Folge nach der anderen, in der Reihenfolge der Warteschlange, damit bei
+  langsamer Verbindung die nächste Folge zuerst fertig ist. Wartende Downloads zeigen, worauf sie warten:
+  ein WLAN-Symbol bei „nur im WLAN“ (antippen: „Jetzt über Mobilfunk laden“ für diese eine Folge oder
+  abbrechen), sonst einen ruhigen Ring. Wird „nur im WLAN“ umgeschaltet, gilt das sofort auch für wartende
+  Downloads
 - **Downloads**: Knopf an jeder Folge. Übersicht aller heruntergeladenen Folgen mit Gesamtlänge und
   Speicherbedarf unter Einstellungen → Podcasts → „Ansehen“
 - **Sleep-Timer** im Player: 5 bis 90 Minuten oder bis zum Ende der Folge, mit sanftem Ausblenden

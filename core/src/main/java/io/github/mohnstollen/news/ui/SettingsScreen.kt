@@ -636,7 +636,9 @@ private fun PodcastSection(prefs: Prefs, onChange: ((Prefs) -> Prefs) -> Unit, o
     )
     SwitchRow(
         title = "Downloads nur im WLAN",
-        subtitle = "Folgen werden erst geladen, wenn ein Netz ohne Volumenbegrenzung da ist.",
+        subtitle = "Folgen werden erst geladen, wenn ein Netz ohne Volumenbegrenzung da ist; bis dahin zeigen sie " +
+            "ein WLAN-Symbol, über das eine einzelne Folge doch sofort per Mobilfunk lädt. Geladen wird eine " +
+            "Folge nach der anderen, in der Reihenfolge der Warteschlange.",
         checked = prefs.downloadWifiOnly,
         onChange = { value -> onChange { it.copy(downloadWifiOnly = value) } },
     )

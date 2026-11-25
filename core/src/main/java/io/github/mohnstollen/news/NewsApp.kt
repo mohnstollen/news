@@ -22,6 +22,9 @@ import io.github.mohnstollen.news.widget.PlayerWidgetUpdater
 import io.github.mohnstollen.news.work.RefreshWorker
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 class AppContainer(app: Application, val features: AppFeatures) {
     val http = newHttpClient()
@@ -44,6 +47,11 @@ class AppContainer(app: Application, val features: AppFeatures) {
         if (features.podcasts) {
             repository.onNewEpisodes = downloads::enqueueNewEpisodes
             repository.onQueued = downloads::onQueued
+            // Switching "Downloads nur im WLAN" applies to waiting downloads at once.
+            repository.scope.launch {
+                settings.flow.map { it.downloadWifiOnly }.distinctUntilChanged().drop(1)
+                    .collect { downloads.followNetworkSetting() }
+            }
         }
         repository.onFeedDeleting = downloads::deleteFiles
     }
