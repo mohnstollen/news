@@ -46,9 +46,18 @@ object Episodes {
 
     /**
      * Where to start: the saved position, unless the episode was finished or nearly so; with an
-     * end buffer ([endBufferMs]), a position in the outro starts over too.
+     * end buffer ([endBufferMs]), a position in the outro starts over too. From the beginning, an
+     * intro of [skipIntroMs] is skipped.
      */
-    fun startPosition(article: Article, endBufferMs: Long = 0): Long {
+    fun startPosition(article: Article, endBufferMs: Long = 0, skipIntroMs: Long = 0): Long {
+        val saved = savedStart(article, endBufferMs)
+        if (saved > 0 || skipIntroMs <= 0) return saved
+        // Starting from the beginning: past the podcast's intro, unless the episode is that short.
+        val durationMs = article.durationSeconds?.takeIf { it > 0 }?.times(1000)
+        return if (durationMs == null || skipIntroMs < durationMs / 2) skipIntroMs else 0
+    }
+
+    private fun savedStart(article: Article, endBufferMs: Long): Long {
         val position = article.playPosition
         if (position <= 0 || article.playedAt > 0) return 0
         val durationMs = article.durationSeconds?.times(1000) ?: return position
@@ -71,8 +80,9 @@ object Episodes {
         endBufferMs: Long = 0,
     ): Pair<MediaItem, Long>? {
         val article = mediaId.toLongOrNull()?.let { articles.byId(it) } ?: return null
-        val item = mediaItem(article, feeds.byId(article.feedId)) ?: return null
-        return item to startPosition(article, endBufferMs)
+        val feed = feeds.byId(article.feedId)
+        val item = mediaItem(article, feed) ?: return null
+        return item to startPosition(article, endBufferMs, (feed?.skipIntroSeconds ?: 0) * 1000L)
     }
 
     /** Short status for lists: "45 Min", "noch 12 Min", "Gehört"; null if nothing is known. */

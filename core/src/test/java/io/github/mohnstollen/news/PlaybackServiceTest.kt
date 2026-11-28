@@ -203,11 +203,13 @@ class PlaybackServiceTest {
         // The feed did not say how long it is; the player found out.
         waitFor("length learned") { runBlocking { repo.articleDao.byId(first)!!.durationSeconds } == 100L }
 
-        // Far from the end: playing a moment changes nothing. (Robolectric plays faster than real
-        // time, so this keeps a wide margin; Episodes.inEndBuffer has the exact limits.)
+        // Far from the end: starting to play changes nothing; the end buffer watcher looks once at
+        // once. The test clock stays put here: with it moving, the test's audio output takes data
+        // as fast as it comes, and a fast machine "plays" a minute in a few steps, into the buffer.
+        // (Episodes.inEndBuffer has the exact limits.)
         controller.seekTo(10_000)
         controller.play()
-        repeat(2) { shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(100)) }
+        waitFor("playing") { player.isPlaying }
         controller.pause()
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(first.toString(), player.currentMediaItem?.mediaId)
@@ -270,9 +272,9 @@ class PlaybackServiceTest {
     @Test
     fun lockScreenButtonsInBothLayouts() {
         val episodes = io.github.mohnstollen.news.playback.LockScreenControls
-        // Previous/next episode next to play: the 10 s and 30 s buttons come after, 30 s first.
+        // Previous/next episode next to play: the 10 s and 30 s buttons come after, back left of forward.
         val episodesFirst = episodes.buttons(seekMain = false)
-        assertEquals(listOf("podfang.SEEK_FORWARD", "podfang.SEEK_BACK"), episodesFirst.map { it.sessionCommand!!.customAction })
+        assertEquals(listOf("podfang.SEEK_BACK", "podfang.SEEK_FORWARD"), episodesFirst.map { it.sessionCommand!!.customAction })
         assertTrue(episodesFirst.all { it.slots.get(0) == androidx.media3.session.CommandButton.SLOT_OVERFLOW })
         assertTrue(episodes.notificationPlayerCommands(false).contains(androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT))
         // 10 s / 30 s next to play: they take those places, the episode buttons follow.
@@ -337,6 +339,44 @@ class PlaybackServiceTest {
         controller.seekToPrevious()
         waitFor("restart") { player.currentPosition < 1_000L }
         assertEquals(a.toString(), player.currentMediaItem?.mediaId)
+        controller.release()
+    }
+
+    @Test
+    fun aPodcastPlaysAtItsOwnSpeedAndSkipsItsIntro() {
+        val (own, plain) = runBlocking {
+            val ownFeed = repo.feedDao.insert(Feed(url = "https://own.example/feed", title = "Schnell", playbackSpeed = 1.5f, skipIntroSeconds = 30))
+            val plainFeed = repo.feedDao.insert(Feed(url = "https://plain.example/feed", title = "Normal"))
+            fun episode(feedId: Long, guid: String) = Article(
+                feedId = feedId, guid = guid, title = "Folge $guid", pubDate = 0, fetchedAt = 0,
+                enclosureUrl = "https://cdn.example.org/$guid.wav", enclosureType = "audio/wav",
+                downloadPath = silence("$guid.wav", seconds = 100.0).path,
+            )
+            repo.articleDao.insertAll(listOf(episode(ownFeed, "own"), episode(plainFeed, "plain"))).let { it[0] to it[1] }
+        }
+        context.container.settings.update { it.copy(playbackSpeed = 1.2f) }
+        val service = startService()
+        val session = service.sessions.single()
+        val player = session.player
+        val future = MediaController.Builder(context, session.token).buildAsync()
+        waitFor("controller") { future.isDone }
+        val controller = future.get()
+
+        controller.setMediaItem(MediaItem.Builder().setMediaId(own.toString()).build())
+        waitFor("own speed") { player.playbackParameters.speed == 1.5f }
+        assertEquals("past the intro", 30_000L, player.currentPosition)
+
+        // Changed while it plays: kept for this podcast, not for the app.
+        controller.setPlaybackSpeed(1.8f)
+        waitFor("kept for the podcast") { runBlocking { repo.feedDao.byId(repo.articleDao.byId(own)!!.feedId)!!.playbackSpeed } == 1.8f }
+        assertEquals(1.2f, context.container.settings.current.playbackSpeed)
+
+        // Another podcast: the app's speed again, from the start.
+        controller.setMediaItem(MediaItem.Builder().setMediaId(plain.toString()).build())
+        waitFor("app's speed") { player.playbackParameters.speed == 1.2f && player.currentMediaItem?.mediaId == plain.toString() }
+        assertEquals(0L, player.currentPosition)
+        controller.setPlaybackSpeed(1f)
+        waitFor("app setting") { context.container.settings.current.playbackSpeed == 1f }
         controller.release()
     }
 }

@@ -31,6 +31,8 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -440,27 +442,38 @@ fun DownloadButton(articleId: Long, downloaded: Boolean, download: DownloadProgr
         onDownload = { scope.launch { downloads.download(listOf(articleId)) } },
         onCancel = { downloads.cancel(articleId) },
         onDelete = { scope.launch { downloads.delete(listOf(articleId)) } },
+        onDownloadNow = { scope.launch { downloads.downloadNow(articleId) } },
     )
 }
 
 @Composable
 private fun DownloadProgressIcon(download: DownloadProgress, modifier: Modifier) {
     val fraction = download.fraction
-    val description = when {
-        !download.running -> "Download wartet"
-        fraction != null -> "Wird geladen, ${(fraction * 100).toInt()} %"
-        else -> "Wird geladen"
+    val description = when (download.waiting) {
+        DownloadProgress.Waiting.TURN -> "Wartet auf den vorigen Download"
+        DownloadProgress.Waiting.WIFI -> "Wartet auf WLAN"
+        DownloadProgress.Waiting.NETWORK -> "Wartet auf Netz"
+        null -> if (fraction != null) "Wird geladen, ${(fraction * 100).toInt()} %" else "Wird geladen"
     }
     Box(modifier.semantics { contentDescription = description }) {
-        if (download.running && fraction != null) {
-            CircularProgressIndicator(progress = { fraction }, strokeWidth = 2.dp, modifier = Modifier.matchParentSize())
-        } else {
-            CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.matchParentSize())
+        when {
+            // Waiting: a still, empty ring, so it does not look busy.
+            download.waiting != null -> CircularProgressIndicator(
+                progress = { 0f },
+                strokeWidth = 2.dp,
+                trackColor = MaterialTheme.colorScheme.outlineVariant,
+                modifier = Modifier.matchParentSize(),
+            )
+            fraction != null -> CircularProgressIndicator(progress = { fraction }, strokeWidth = 2.dp, modifier = Modifier.matchParentSize())
+            else -> CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.matchParentSize())
         }
     }
 }
 
-/** Download, cancel or delete the episode's file. */
+/**
+ * Download, cancel or delete the episode's file. Waiting for Wi-Fi it shows so, and a tap offers
+ * to go ahead over mobile data ([onDownloadNow]) or to cancel.
+ */
 @Composable
 fun EpisodeDownloadButton(
     downloaded: Boolean,
@@ -468,8 +481,27 @@ fun EpisodeDownloadButton(
     onDownload: () -> Unit,
     onCancel: () -> Unit,
     onDelete: () -> Unit,
+    onDownloadNow: (() -> Unit)? = null,
 ) {
     when {
+        download?.waiting == DownloadProgress.Waiting.WIFI -> Box {
+            var menu by remember { mutableStateOf(false) }
+            IconButton(onClick = { menu = true }) {
+                Icon(AppIcons.Wifi, contentDescription = "Wartet auf WLAN", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                Text(
+                    "Wartet auf WLAN",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+                if (onDownloadNow != null) {
+                    DropdownMenuItem(text = { Text("Jetzt über Mobilfunk laden") }, onClick = { menu = false; onDownloadNow() })
+                }
+                DropdownMenuItem(text = { Text("Download abbrechen") }, onClick = { menu = false; onCancel() })
+            }
+        }
         download != null -> IconButton(onClick = onCancel) {
             Box(contentAlignment = Alignment.Center) {
                 DownloadProgressIcon(download, Modifier.size(28.dp))

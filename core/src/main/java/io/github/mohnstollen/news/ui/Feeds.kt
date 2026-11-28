@@ -41,6 +41,9 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import io.github.mohnstollen.news.playback.PlayerConnection
+import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -410,6 +413,11 @@ internal fun EditFeedDialog(
     var fullText by rememberSaveable { mutableStateOf(feed.fetchFullText) }
     var notify by rememberSaveable { mutableStateOf(feed.notify) }
     var autoDownload by rememberSaveable { mutableStateOf(feed.autoDownload) }
+    // Podcasts: own speed (null: the app's) and intro to skip.
+    var speed by rememberSaveable { mutableStateOf(feed.playbackSpeed) }
+    var skipIntro by rememberSaveable { mutableStateOf(feed.skipIntroSeconds) }
+    val podcasts = LocalContext.current.features.podcasts
+    val feedDao = LocalContext.current.container.repository.feedDao
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -474,6 +482,31 @@ internal fun EditFeedDialog(
                     }
                     Switch(checked = autoDownload, onCheckedChange = { autoDownload = it }, enabled = !busy)
                 }
+                if (podcasts) {
+                    Text("Geschwindigkeit")
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = speed == null, onClick = { speed = null }, label = { Text("Wie eingestellt") }, enabled = !busy)
+                        PlayerConnection.SPEEDS.forEach { s ->
+                            FilterChip(selected = speed == s, onClick = { speed = s }, label = { Text(speedLabel(s)) }, enabled = !busy)
+                        }
+                    }
+                    Text("Anfang überspringen")
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SKIP_INTRO_CHOICES.forEach { seconds ->
+                            FilterChip(
+                                selected = skipIntro == seconds,
+                                onClick = { skipIntro = seconds },
+                                label = { Text(if (seconds == 0) "Nein" else "$seconds s") },
+                                enabled = !busy,
+                            )
+                        }
+                    }
+                    Text(
+                        "Bei Folgen, die noch nicht begonnen sind, etwa für ein Intro oder Werbung am Anfang.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             }
@@ -486,6 +519,7 @@ internal fun EditFeedDialog(
                     scope.launch {
                         try {
                             onSave(title, url, category, fullText, notify, autoDownload)
+                            if (podcasts) feedDao.setPlaybackOptions(feed.id, speed, skipIntro)
                             onSaved()
                         } catch (e: CancellationException) {
                             throw e
@@ -501,3 +535,6 @@ internal fun EditFeedDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
     )
 }
+
+/** Seconds a podcast's intro may be skipped by. */
+private val SKIP_INTRO_CHOICES = listOf(0, 10, 20, 30, 45, 60, 90)

@@ -30,6 +30,7 @@ import io.github.mohnstollen.news.data.SettingsStore
 import io.github.mohnstollen.news.playback.Episodes
 import io.github.mohnstollen.news.playback.NowPlaying
 import io.github.mohnstollen.news.playback.PlaybackService
+import io.github.mohnstollen.news.playback.RemotePlayback
 import io.github.mohnstollen.news.ui.MainActivity
 import io.github.mohnstollen.news.ui.container
 import io.github.mohnstollen.news.work.Notifier
@@ -312,7 +313,7 @@ object PlayerWidget {
      */
     suspend fun perform(context: Context, action: String) {
         val repo = context.container.repository
-        val controller = connect(context)
+        val controller = RemotePlayback.connect(context)
         try {
             val current = controller.currentMediaItem?.mediaId?.toLongOrNull()
             val state = controller.playbackState
@@ -342,39 +343,17 @@ object PlayerWidget {
                 ACTION_NEXT -> if (active) controller.seekToNext()
                 else repo.nextInQueue(current ?: repo.queueDao.ids().firstOrNull())?.let(::play)
             }
-            // The service may run only for this controller; letting go of it before playback is
-            // under way (and so in the foreground) would end the service again.
-            if (started) withTimeoutOrNull(START_TIMEOUT_MS) { awaitUntil(controller) { it.isPlaying || it.playerError != null } }
+            if (started) RemotePlayback.awaitStarted(controller)
         } finally {
             controller.release()
         }
     }
 
-    private const val START_TIMEOUT_MS = 5_000L
-
     /** Whether [command] can be given, waiting a moment for it if need be. */
     private suspend fun awaitCommand(controller: MediaController, command: Int): Boolean =
-        withTimeoutOrNull(START_TIMEOUT_MS) { awaitUntil(controller) { it.isCommandAvailable(command) } } != null
-
-    /** Returns once [condition] holds for [controller]. */
-    private suspend fun awaitUntil(controller: MediaController, condition: (Player) -> Boolean) =
-        suspendCancellableCoroutine { done ->
-            val listener = object : Player.Listener {
-                override fun onEvents(player: Player, events: Player.Events) {
-                    if (condition(player) && done.isActive) {
-                        player.removeListener(this)
-                        done.resume(Unit)
-                    }
-                }
-            }
-            done.invokeOnCancellation { controller.removeListener(listener) }
-            if (condition(controller)) done.resume(Unit) else controller.addListener(listener)
-        }
-
-    private suspend fun connect(context: Context): MediaController {
-        val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
-        return MediaController.Builder(context, token).buildAsync().await()
-    }
+        withTimeoutOrNull(RemotePlayback.START_TIMEOUT_MS) {
+            RemotePlayback.awaitUntil(controller) { it.isCommandAvailable(command) }
+        } != null
 }
 
 /**

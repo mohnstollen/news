@@ -14,6 +14,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.RoomDatabase
+import androidx.room.Transaction
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
@@ -39,6 +40,10 @@ data class Feed(
     val imageUrl: String? = null,
     /** Download new episodes of this feed after each update. */
     @ColumnInfo(defaultValue = "0") val autoDownload: Boolean = false,
+    /** Playback speed for this podcast's episodes; null: the app's speed. */
+    val playbackSpeed: Float? = null,
+    /** Seconds skipped at the start of an episode not begun yet (an intro); 0: none. */
+    @ColumnInfo(defaultValue = "0") val skipIntroSeconds: Int = 0,
 )
 
 @Entity(
@@ -120,6 +125,68 @@ data class QueueEntry(
     @PrimaryKey val articleId: Long,
     val position: Long,
 )
+
+/**
+ * Where an episode was heard, not yet sent to gPodder Sync: one row per episode, the latest
+ * change. [startedMs] is where that listening began.
+ */
+@Entity(
+    tableName = "play_actions",
+    foreignKeys = [
+        ForeignKey(entity = Article::class, parentColumns = ["id"], childColumns = ["articleId"], onDelete = ForeignKey.CASCADE),
+    ],
+)
+data class PlayAction(
+    @PrimaryKey val articleId: Long,
+    val startedMs: Long,
+    val positionMs: Long,
+    /** When it happened, ms since 1970. */
+    val at: Long,
+)
+
+/** A [PlayAction] with what gPodder Sync needs to know the episode. */
+data class PlayActionRow(
+    val articleId: Long,
+    val startedMs: Long,
+    val positionMs: Long,
+    val at: Long,
+    val feedUrl: String,
+    val guid: String,
+    val enclosureUrl: String?,
+    val durationSeconds: Long?,
+)
+
+@Dao
+interface PlayActionDao {
+    @Query("INSERT OR IGNORE INTO play_actions (articleId, startedMs, positionMs, at) VALUES (:articleId, :positionMs, :positionMs, :at)")
+    suspend fun insertIfNew(articleId: Long, positionMs: Long, at: Long)
+
+    @Query("UPDATE play_actions SET positionMs = :positionMs, at = :at WHERE articleId = :articleId")
+    suspend fun update(articleId: Long, positionMs: Long, at: Long)
+
+    /** Records a change; where the listening began stays as it was. (No UPSERT: Android 8 lacks it.) */
+    @Transaction
+    suspend fun record(articleId: Long, positionMs: Long, at: Long) {
+        insertIfNew(articleId, positionMs, at)
+        update(articleId, positionMs, at)
+    }
+
+    @Query(
+        "SELECT p.articleId, p.startedMs, p.positionMs, p.at, f.url AS feedUrl, a.guid, a.enclosureUrl, a.durationSeconds " +
+            "FROM play_actions p JOIN articles a ON a.id = p.articleId JOIN feeds f ON f.id = a.feedId",
+    )
+    suspend fun pending(): List<PlayActionRow>
+
+    @Query("SELECT * FROM play_actions WHERE articleId = :articleId")
+    suspend fun byArticle(articleId: Long): PlayAction?
+
+    /** Sent: gone, unless it changed meanwhile. */
+    @Query("DELETE FROM play_actions WHERE articleId = :articleId AND at = :at")
+    suspend fun sent(articleId: Long, at: Long)
+
+    @Query("DELETE FROM play_actions")
+    suspend fun clear()
+}
 
 data class QueueItem(
     val id: Long,
@@ -342,6 +409,12 @@ interface FeedDao {
     @Query("UPDATE feeds SET autoDownload = :autoDownload WHERE id = :id")
     suspend fun setAutoDownload(id: Long, autoDownload: Boolean)
 
+    @Query("UPDATE feeds SET playbackSpeed = :speed, skipIntroSeconds = :skipIntroSeconds WHERE id = :id")
+    suspend fun setPlaybackOptions(id: Long, speed: Float?, skipIntroSeconds: Int)
+
+    @Query("UPDATE feeds SET playbackSpeed = :speed WHERE id = :id")
+    suspend fun setPlaybackSpeed(id: Long, speed: Float)
+
     @Query("UPDATE feeds SET etag = NULL, lastModified = NULL WHERE id = :id")
     suspend fun clearCacheHeaders(id: Long)
 
@@ -453,6 +526,44 @@ interface ArticleDao {
     @Query("SELECT EXISTS(SELECT 1 FROM articles WHERE feedId = :feedId AND enclosureUrl IS NOT NULL)")
     suspend fun hasEpisodes(feedId: Long): Boolean
 
+    /** The inbox ("Neu") for the car: episodes neither played, archived nor queued; newest first. */
+    @Query(
+        "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
+            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt, " +
+            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived, " +
+            "a.imageUrl, f.imageUrl AS feedImageUrl " +
+            "FROM articles a JOIN feeds f ON f.id = a.feedId " +
+            "WHERE a.enclosureUrl IS NOT NULL AND a.playedAt = 0 AND a.read = 0 AND a.archivedAt = 0 " +
+            "AND a.id NOT IN (SELECT articleId FROM queue) ORDER BY a.pubDate DESC, a.id DESC LIMIT :limit",
+    )
+    suspend fun inbox(limit: Int): List<ArticleListItem>
+
+    /** Episodes of one podcast, newest first; archived ones too, but not those without a file. */
+    @Query(
+        "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
+            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt, " +
+            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived, " +
+            "a.imageUrl, f.imageUrl AS feedImageUrl " +
+            "FROM articles a JOIN feeds f ON f.id = a.feedId " +
+            "WHERE a.feedId = :feedId AND a.enclosureUrl IS NOT NULL ORDER BY a.pubDate DESC, a.id DESC LIMIT :limit",
+    )
+    suspend fun episodes(feedId: Long, limit: Int): List<ArticleListItem>
+
+    /** Episodes whose title contains [text] (ignoring case), newest first; for voice requests. */
+    @Query(
+        "SELECT a.id, a.feedId, f.title AS feedTitle, a.title, a.summary, a.pubDate, a.read, a.starred, " +
+            "(a.note IS NOT NULL AND a.note != '') AS hasNote, f.category AS category, a.readAt, " +
+            "(a.enclosureUrl IS NOT NULL) AS hasAudio, a.durationSeconds, a.playPosition, a.playedAt, " +
+            "(a.downloadPath IS NOT NULL) AS downloaded, (a.archivedAt > 0) AS archived, " +
+            "a.imageUrl, f.imageUrl AS feedImageUrl " +
+            "FROM articles a JOIN feeds f ON f.id = a.feedId " +
+            "WHERE a.enclosureUrl IS NOT NULL AND a.title LIKE '%' || :text || '%' " +
+            "ORDER BY a.pubDate DESC, a.id DESC LIMIT :limit",
+    )
+    suspend fun episodesTitled(text: String, limit: Int): List<ArticleListItem>
+
     @Query("SELECT title FROM articles WHERE feedId = :feedId ORDER BY pubDate DESC LIMIT :limit")
     suspend fun recentTitles(feedId: Long, limit: Int): List<String>
 
@@ -467,6 +578,9 @@ interface ArticleDao {
 
     @Query("SELECT * FROM articles WHERE id = :id")
     suspend fun byId(id: Long): Article?
+
+    @Query("SELECT * FROM articles WHERE feedId = :feedId AND enclosureUrl = :url LIMIT 1")
+    suspend fun byEnclosure(feedId: Long, url: String): Article?
 
     @Query("SELECT * FROM articles WHERE feedId = :feedId AND guid = :guid")
     suspend fun byGuid(feedId: Long, guid: String): Article?
@@ -580,8 +694,9 @@ interface ArticleDao {
 @Database(
     entities = [
         Feed::class, Article::class, DeletedFeed::class, ArticleFts::class, QueueEntry::class, ListenEntry::class,
+        PlayAction::class,
     ],
-    version = 7,
+    version = 9,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -589,6 +704,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun articleDao(): ArticleDao
     abstract fun queueDao(): QueueDao
     abstract fun listenDao(): ListenDao
+    abstract fun playActionDao(): PlayActionDao
 
     companion object {
         /** Adds the per-feed notification switch and the search index. */
@@ -658,7 +774,29 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+        /** Listening positions waiting for gPodder Sync. */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `play_actions` (`articleId` INTEGER NOT NULL, `startedMs` INTEGER NOT NULL, " +
+                        "`positionMs` INTEGER NOT NULL, `at` INTEGER NOT NULL, PRIMARY KEY(`articleId`), " +
+                        "FOREIGN KEY(`articleId`) REFERENCES `articles`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+                )
+            }
+        }
+
+        /** Speed and intro to skip per podcast. */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE feeds ADD COLUMN playbackSpeed REAL")
+                db.execSQL("ALTER TABLE feeds ADD COLUMN skipIntroSeconds INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        val MIGRATIONS = arrayOf(
+            MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+            MIGRATION_8_9,
+        )
     }
 }
 

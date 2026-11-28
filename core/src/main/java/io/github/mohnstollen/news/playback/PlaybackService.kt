@@ -29,8 +29,12 @@ import com.google.common.util.concurrent.Futures
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
+import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaLibraryService.LibraryParams
+import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
+import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.ListenableFuture
 import io.github.mohnstollen.news.ui.MainActivity
 import io.github.mohnstollen.news.ui.container
@@ -44,15 +48,18 @@ import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Plays podcast episodes in the background. The media session gives the system notification,
  * lock screen, headset buttons and Bluetooth controls; the app's screens connect through
- * [PlayerConnection]. One episode at a time; its media id is the article id.
+ * [PlayerConnection]. One episode at a time; its media id is the article id. As a media library
+ * it lets Android Auto browse the queue, the inbox and the podcasts ([Library]).
  */
 @OptIn(UnstableApi::class)
-class PlaybackService : MediaSessionService() {
-    private var session: MediaSession? = null
+class PlaybackService : MediaLibraryService() {
+    private var session: MediaLibrarySession? = null
     private val main = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     /**
@@ -62,6 +69,10 @@ class PlaybackService : MediaSessionService() {
      */
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private val writes = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+    /** One thread alone does not keep the order once a write waits for a transaction; this lock (fair) does. */
+    private val writeLock = Mutex()
+
+    private fun write(block: suspend () -> Unit) = writes.launch { writeLock.withLock { block() } }
     private var saveJob: Job? = null
     private var sleepJob: Job? = null
     private var endBufferJob: Job? = null
@@ -106,14 +117,20 @@ class PlaybackService : MediaSessionService() {
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        session = MediaSession.Builder(this, queuePlayer)
-            .setCallback(callback)
+        session = MediaLibrarySession.Builder(this, queuePlayer, callback)
             .setSessionActivity(openApp)
             .setMediaButtonPreferences(LockScreenControls.buttons(seekMain()))
             .build()
             .also(::addSession)
 
         main.launch { container.sleepTimer.mode.collect(::onSleepTimer) }
+        // A car showing the queue or the inbox shows them as they change.
+        main.launch {
+            repo.queueDao.observeIds().distinctUntilChanged().drop(1).collect { ids ->
+                session?.notifyChildrenChanged(Library.QUEUE, ids.size, null)
+                session?.notifyChildrenChanged(Library.NEW, Library.LIMIT, null)
+            }
+        }
         // The button layout follows the setting at once, also while playing.
         main.launch {
             container.settings.flow.map { it.lockScreenSeek }.distinctUntilChanged().drop(1).collect { seek ->
@@ -127,6 +144,21 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun seekMain() = container.settings.current.lockScreenSeek
+
+    /** The podcast whose own speed is in effect; null while the app's speed is. */
+    private var speedOwner: Long? = null
+
+    /** Each podcast plays at its own speed if it has one, else at the app's. */
+    private fun applySpeed(articleId: Long?) {
+        main.launch {
+            val feed = articleId?.let { repo.articleDao.byId(it) }?.let { repo.feedDao.byId(it.feedId) }
+            val own = feed?.playbackSpeed
+            speedOwner = feed?.id?.takeIf { own != null }
+            val speed = own ?: container.settings.current.playbackSpeed
+            val player = session?.player ?: return@launch
+            if (player.playbackParameters.speed != speed) player.setPlaybackSpeed(speed)
+        }
+    }
 
     /** Episodes played before the current one, the latest last; for "previous episode". */
     private val history = ArrayDeque<Long>()
@@ -186,7 +218,19 @@ class PlaybackService : MediaSessionService() {
         player.play()
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
+
+    /** The library as a browser sees it: covers it may read. */
+    private fun library(browser: MediaSession.ControllerInfo) =
+        Library(repo) { cover -> CoverProvider.grantedUri(this, cover, browser.packageName) }
+
+    /**
+     * Who may browse the episodes: this app, the car (Android Auto, Android Automotive) and the
+     * Google assistants. Others may still control playback, as on the lock screen.
+     */
+    private fun mayBrowse(session: MediaSession, browser: MediaSession.ControllerInfo): Boolean =
+        browser.packageName == packageName || browser.packageName in TRUSTED_BROWSERS ||
+            session.isAutoCompanionController(browser) || session.isAutomotiveController(browser)
 
     /** Swiping the app away stops the service, unless something is playing. */
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -210,7 +254,59 @@ class PlaybackService : MediaSessionService() {
         super.onDestroy()
     }
 
-    private val callback = object : MediaSession.Callback {
+    private val callback = object : MediaLibrarySession.Callback {
+        override fun onGetLibraryRoot(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            if (!mayBrowse(session, browser)) return Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_PERMISSION_DENIED))
+            val rootParams = LibraryParams.Builder().setExtras(Library.rootExtras).build()
+            return Futures.immediateFuture(LibraryResult.ofItem(library(browser).root(), rootParams))
+        }
+
+        override fun onGetChildren(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            parentId: String,
+            page: Int,
+            pageSize: Int,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+            if (!mayBrowse(session, browser)) return Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_PERMISSION_DENIED))
+            return main.future {
+                val all = library(browser).children(parentId)
+                    ?: return@future LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
+                val from = page.toLong() * pageSize
+                val pageItems = if (from >= all.size) emptyList() else all.subList(from.toInt(), minOf(all.size.toLong(), from + pageSize).toInt())
+                LibraryResult.ofItemList(pageItems, params)
+            }
+        }
+
+        override fun onGetItem(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            mediaId: String,
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            if (!mayBrowse(session, browser)) return Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_PERMISSION_DENIED))
+            return main.future {
+                library(browser).item(mediaId)?.let { LibraryResult.ofItem(it, null) }
+                    ?: LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
+            }
+        }
+
+        /** "Play" with nothing loaded (car, headset): where the queue stands. */
+        override fun onPlaybackResumption(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = main.future {
+            val id = library(controller).forVoice(null) ?: throw IllegalStateException("Nichts zum Abspielen")
+            val (item, start) = Episodes.resolve(id.toString(), repo.articleDao, repo.feedDao, endBufferMs())
+                ?: throw IllegalStateException("Folge $id hat keine Audiodatei")
+            repo.enqueueIfAbsent(id, next = true, handOn = false)
+            MediaSession.MediaItemsWithStartPosition(listOf(item), 0, start)
+        }
+
         /** Everyone gets our own commands; the notification (and so the lock screen) its layout. */
         override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
             val result = MediaSession.ConnectionResult.AcceptedResultBuilder(session)
@@ -253,12 +349,16 @@ class PlaybackService : MediaSessionService() {
             return main.future {
                 val wanted = mediaItems.getOrNull(startIndex.coerceAtLeast(0))
                     ?: throw IllegalArgumentException("Keine Folge angegeben")
-                val (item, savedPosition) = Episodes.resolve(wanted.mediaId, repo.articleDao, repo.feedDao, endBufferMs())
-                    ?: throw IllegalArgumentException("Folge ${wanted.mediaId} hat keine Audiodatei")
+                // A spoken request ("Spiele … auf Podfang") comes as words instead of an id.
+                val mediaId = wanted.mediaId.takeIf { it.isNotEmpty() && it != MediaItem.DEFAULT_MEDIA_ID }
+                    ?: library(controller).forVoice(wanted.requestMetadata.searchQuery)?.toString()
+                    ?: throw IllegalArgumentException("Nichts zum Abspielen gefunden")
+                val (item, savedPosition) = Episodes.resolve(mediaId, repo.articleDao, repo.feedDao, endBufferMs())
+                    ?: throw IllegalArgumentException("Folge $mediaId hat keine Audiodatei")
                 val start = if (startPositionMs == C.TIME_UNSET) savedPosition else startPositionMs
                 // What is being listened to is in the queue, at the top if it was not yet there.
                 // Not downloaded for that: it is streaming already.
-                wanted.mediaId.toLongOrNull()?.let { repo.enqueueIfAbsent(it, next = true, handOn = false) }
+                mediaId.toLongOrNull()?.let { repo.enqueueIfAbsent(it, next = true, handOn = false) }
                 MediaSession.MediaItemsWithStartPosition(listOf(item), 0, start)
             }
         }
@@ -306,12 +406,13 @@ class PlaybackService : MediaSessionService() {
         override fun onTracksChanged(tracks: Tracks) {
             val id = currentArticleId() ?: return
             val chapters = id3Chapters(tracks).takeIf { it.isNotEmpty() } ?: return
-            writes.launch { repo.articleDao.setChaptersIfMissing(id, Chapters.encode(chapters)) }
+            write { repo.articleDao.setChaptersIfMissing(id, Chapters.encode(chapters)) }
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             val now = mediaItem?.mediaId?.toLongOrNull()
             if (now != lastArticleId) {
+                applySpeed(now)
                 lastArticleId?.takeIf { !goingBack }?.let { history.addLast(it) }
                 while (history.size > HISTORY_SIZE) history.removeFirst()
                 goingBack = false
@@ -331,20 +432,24 @@ class PlaybackService : MediaSessionService() {
             val timer = container.sleepTimer
             val stopHere = timer.mode.value == SleepTimer.Mode.EndOfEpisode
             if (stopHere) timer.cancel()
-            writes.launch {
+            write {
                 repo.setPlayed(id, true)
                 repo.logListening(id, 0, 0, finished = true)
                 downloads.onPlayed(id)
-                if (stopHere) return@launch
+                if (stopHere) return@write
                 // setPlayed took the finished episode out of the queue.
-                val next = repo.nextInQueue(id) ?: return@launch
+                val next = repo.nextInQueue(id) ?: return@write
                 withContext(Dispatchers.Main) { playFromQueue(next) }
             }
         }
 
         override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
             val speed = playbackParameters.speed
-            if (speed != container.settings.current.playbackSpeed) {
+            // A podcast with its own speed keeps the change for itself.
+            val owner = speedOwner
+            if (owner != null) {
+                write { repo.feedDao.setPlaybackSpeed(owner, speed) }
+            } else if (speed != container.settings.current.playbackSpeed) {
                 container.settings.update { it.copy(playbackSpeed = speed) }
             }
         }
@@ -353,6 +458,7 @@ class PlaybackService : MediaSessionService() {
     /** Podcasting 2.0: the feed links a JSON file with the chapters; loaded once, when played. */
     private fun loadLinkedChapters(articleId: Long) {
         val http = container.http
+        // Not in line with the other writes: it waits for the network.
         writes.launch {
             val article = repo.articleDao.byId(articleId) ?: return@launch
             val url = article.chaptersUrl ?: return@launch
@@ -389,7 +495,7 @@ class PlaybackService : MediaSessionService() {
         val player = session?.player ?: return
         val id = currentArticleId() ?: return
         val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: return
-        writes.launch { repo.articleDao.learnDuration(id, duration / 1000) }
+        write { repo.articleDao.learnDuration(id, duration / 1000) }
     }
 
     private fun endBufferMs(): Long = container.settings.current.endBufferSeconds * 1000L
@@ -421,7 +527,7 @@ class PlaybackService : MediaSessionService() {
         listeningSince = now
         if (listened <= 0) return
         val content = (listened * player.playbackParameters.speed).toLong()
-        writes.launch { repo.logListening(id, listened, content) }
+        write { repo.logListening(id, listened, content) }
     }
 
     private fun currentArticleId(): Long? = session?.player?.currentMediaItem?.mediaId?.toLongOrNull()
@@ -432,7 +538,7 @@ class PlaybackService : MediaSessionService() {
         val id = currentArticleId() ?: return
         if (player.playbackState == Player.STATE_ENDED) return
         val position = player.currentPosition
-        writes.launch { repo.savePlayPosition(id, position) }
+        write { repo.savePlayPosition(id, position) }
     }
 
     /** A missing or forbidden file does not come back by asking again; network trouble may pass. */
@@ -453,6 +559,11 @@ class PlaybackService : MediaSessionService() {
         /** "Previous" within this time of an episode's start goes to the episode before. */
         const val RESTART_WINDOW_MS = 5_000L
         private const val HISTORY_SIZE = 20
+        private val TRUSTED_BROWSERS = setOf(
+            "com.google.android.projection.gearhead",
+            "com.google.android.carassistant",
+            "com.google.android.googlequicksearchbox",
+        )
         private val WIDGET_EVENTS = intArrayOf(
             Player.EVENT_IS_PLAYING_CHANGED,
             Player.EVENT_PLAY_WHEN_READY_CHANGED,

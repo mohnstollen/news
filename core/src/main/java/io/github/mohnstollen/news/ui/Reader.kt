@@ -125,6 +125,11 @@ class ReaderViewModel(app: Application, handle: SavedStateHandle) : AndroidViewM
 
     fun cancelDownload() = downloads.cancel(id)
 
+    /** Waiting for Wi-Fi: go ahead over mobile data. */
+    fun downloadNow() {
+        viewModelScope.launch { downloads.downloadNow(id) }
+    }
+
     fun deleteDownload() {
         viewModelScope.launch { downloads.delete(listOf(id)) }
     }
@@ -358,6 +363,7 @@ private fun EpisodePanel(a: Article, download: DownloadProgress?, vm: ReaderView
             onDownload = vm::download,
             onCancel = vm::cancelDownload,
             onDelete = vm::deleteDownload,
+            onDownloadNow = vm::downloadNow,
         )
         IconButton(onClick = vm::togglePlayed) {
             Icon(

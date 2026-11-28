@@ -15,6 +15,8 @@ import io.github.mohnstollen.news.widget.NewsWidget
 import io.github.mohnstollen.news.NewsApp
 import io.github.mohnstollen.news.data.MIN_INTERVAL_MINUTES
 import io.github.mohnstollen.news.data.Prefs
+import io.github.mohnstollen.news.playback.CoverProvider
+import android.graphics.BitmapFactory
 import java.util.concurrent.TimeUnit
 
 /**
@@ -33,10 +35,19 @@ class RefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         val result = container.repository.refreshAll()
         NewsWidget.updateAll(applicationContext)
         runCatching { container.downloads.cleanUp() }
+        // Once a day: is there a newer version of the app?
+        AppUpdates.checkInBackground(applicationContext)
         val manual = inputData.getBoolean(KEY_MANUAL, false)
         if (!manual && prefs.notifyNewArticles && result.notifyIds.isNotEmpty()) {
+            val podcasts = container.features.podcasts
+            // In Podfang only episodes: an entry without a file is no episode.
             val articles = container.repository.articleDao.listItems(result.notifyIds.take(500))
-            Notifier.showNewArticles(applicationContext, articles)
+                .filter { !podcasts || it.hasAudio }
+            val cover = articles.singleOrNull()?.takeIf { podcasts }?.let { episode ->
+                runCatching { CoverProvider.file(applicationContext, CoverProvider.Cover.Episode(episode.id)) }.getOrNull()
+                    ?.let { BitmapFactory.decodeFile(it.path) }
+            }
+            Notifier.showNewArticles(applicationContext, articles, cover)
         }
         return if (result.failedFeeds > 0 && result.newArticles == 0 && runAttemptCount < 2) Result.retry() else Result.success()
     }

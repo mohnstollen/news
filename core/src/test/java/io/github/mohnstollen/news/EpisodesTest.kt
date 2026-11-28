@@ -67,6 +67,12 @@ class EpisodesTest {
         assertEquals("unknown length: resume anyway", 600_000L, Episodes.startPosition(episode.copy(playPosition = 600_000, durationSeconds = null)))
         assertEquals("a few seconds before the end", 0L, Episodes.startPosition(episode.copy(playPosition = 1_795_000)))
         assertEquals("played to the end", 0L, Episodes.startPosition(episode.copy(playPosition = 600_000, playedAt = 1)))
+        // A podcast's intro is skipped when starting from the beginning, not when resuming.
+        assertEquals(30_000L, Episodes.startPosition(episode, skipIntroMs = 30_000))
+        assertEquals(600_000L, Episodes.startPosition(episode.copy(playPosition = 600_000), skipIntroMs = 30_000))
+        assertEquals("heard: from the start again, past the intro", 30_000L, Episodes.startPosition(episode.copy(playedAt = 1), skipIntroMs = 30_000))
+        assertEquals("unknown length", 30_000L, Episodes.startPosition(episode.copy(durationSeconds = null), skipIntroMs = 30_000))
+        assertEquals("too short for it", 0L, Episodes.startPosition(episode.copy(durationSeconds = 50), skipIntroMs = 30_000))
         // With a 60-second end buffer, a position in the outro starts over.
         assertEquals(0L, Episodes.startPosition(episode.copy(playPosition = 1_750_000), endBufferMs = 60_000))
         assertEquals(1_700_000L, Episodes.startPosition(episode.copy(playPosition = 1_700_000), endBufferMs = 60_000))

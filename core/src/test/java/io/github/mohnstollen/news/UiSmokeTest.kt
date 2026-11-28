@@ -18,6 +18,9 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeLeft
@@ -817,6 +820,8 @@ class PodfangModeUiTest : UiTestBase() {
         compose.onNodeWithText("Einstellungen").performClick()
         waitFor("Intervall in Minuten")
         compose.onNodeWithText("Folgen der Warteschlange laden").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Hörstand mit gPodder Sync abgleichen").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Nach Updates suchen").performScrollTo().assertIsDisplayed()
         assertTrue(compose.onAllNodesWithText("Widget").fetchSemanticsNodes().isEmpty())
         assertEquals("own Nextcloud folder", "Podfang", context.container.settings.current.ncFolder)
         assertEquals("Podfang (Android)", context.container.features.clientName)
@@ -826,5 +831,43 @@ class PodfangModeUiTest : UiTestBase() {
         waitFor("Noch keine Folgen gemerkt.")
         tab("Neu")
         waitFor("Artikel Nummer 1")
+    }
+}
+
+/**
+ * A podcast's bell and playback options. At the default screen size: at phone size the test
+ * environment (not in touch mode) focuses the dialog's first text field, and its blinking cursor
+ * never lets the screen settle.
+ */
+@Config(application = PodfangTestApp::class, sdk = [34])
+class PodcastOptionsUiTest : UiTestBase() {
+    @Test(timeout = 120000)
+    fun aPodcastsBellAndPlaybackOptions() {
+        fun feed() = runBlocking { repo.feedDao.all().first() }
+        compose.onNodeWithContentDescription("Podcasts", useUnmergedTree = true).performClick()
+        waitFor("Beispielfeed")
+        compose.onNodeWithText("Beispielfeed").performClick()
+        waitFor("30 Folgen")
+
+        // The bell: new episodes of this podcast announced, or not.
+        compose.onNodeWithContentDescription("Neue Folgen melden: an").performClick()
+        compose.waitUntil(5_000) { !feed().notify }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithContentDescription("Neue Folgen melden: aus").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // Its settings: own speed and an intro to skip, shown in the overview. (The chips are
+        // tapped through their click action: simulated touches miss them in the dialog's window here.)
+        compose.onNodeWithContentDescription("Einstellungen des Podcasts").performClick()
+        fun choose(chip: String) {
+            compose.onNodeWithText(chip).performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+            compose.onNodeWithText(chip).assertIsSelected()
+        }
+        choose("1,5×")
+        choose("30 s")
+        compose.onNodeWithText("Speichern").performClick()
+        compose.waitUntil(5_000) { feed().let { it.playbackSpeed == 1.5f && it.skipIntroSeconds == 30 } }
+        waitFor("immer 1,5×")
+        waitFor("überspringt 30 s am Anfang")
     }
 }

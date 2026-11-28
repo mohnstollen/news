@@ -7,12 +7,14 @@ import androidx.room.Room
 import io.github.mohnstollen.news.data.AppDatabase
 import io.github.mohnstollen.news.data.FeedFetcher
 import io.github.mohnstollen.news.data.FullTextExtractor
+import io.github.mohnstollen.news.data.GpodderSync
 import io.github.mohnstollen.news.data.NcLoginFlow
 import io.github.mohnstollen.news.data.Prefs
 import io.github.mohnstollen.news.data.Recommender
 import io.github.mohnstollen.news.data.Repository
 import io.github.mohnstollen.news.data.SettingsStore
 import io.github.mohnstollen.news.data.SyncManager
+import io.github.mohnstollen.news.data.UpdateChecker
 import io.github.mohnstollen.news.data.newHttpClient
 import io.github.mohnstollen.news.playback.Downloads
 import io.github.mohnstollen.news.playback.SleepTimer
@@ -20,6 +22,9 @@ import io.github.mohnstollen.news.widget.PlayerWidgetUpdater
 import io.github.mohnstollen.news.work.RefreshWorker
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 class AppContainer(app: Application, val features: AppFeatures) {
     val http = newHttpClient()
@@ -30,17 +35,23 @@ class AppContainer(app: Application, val features: AppFeatures) {
         .build()
     val settings = SettingsStore(app, Prefs(ncFolder = features.syncFolder))
     val repository = Repository(db, FeedFetcher(http), FullTextExtractor(http), settings)
-    val sync = SyncManager(http, settings, repository)
+    val sync = SyncManager(http, settings, repository, GpodderSync(app, repository).takeIf { features.podcasts })
     val loginFlow = NcLoginFlow(http, settings, sync, repository, clientName = features.clientName)
     val downloads = Downloads(app, repository, settings)
     val sleepTimer = SleepTimer()
     val recommender = Recommender(http, repository)
     val playerWidget = PlayerWidgetUpdater(app, repository, settings)
+    val updates = UpdateChecker(http)
 
     init {
         if (features.podcasts) {
             repository.onNewEpisodes = downloads::enqueueNewEpisodes
             repository.onQueued = downloads::onQueued
+            // Switching "Downloads nur im WLAN" applies to waiting downloads at once.
+            repository.scope.launch {
+                settings.flow.map { it.downloadWifiOnly }.distinctUntilChanged().drop(1)
+                    .collect { downloads.followNetworkSetting() }
+            }
         }
         repository.onFeedDeleting = downloads::deleteFiles
     }

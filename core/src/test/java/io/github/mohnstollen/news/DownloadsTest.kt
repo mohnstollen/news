@@ -8,7 +8,9 @@ import androidx.work.testing.TestListenableWorkerBuilder
 import androidx.work.workDataOf
 import io.github.mohnstollen.news.data.Article
 import io.github.mohnstollen.news.data.Feed
+import io.github.mohnstollen.news.playback.DownloadProgress
 import io.github.mohnstollen.news.playback.DownloadWorker
+import kotlinx.coroutines.flow.first
 import io.github.mohnstollen.news.ui.container
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.Dispatcher
@@ -189,5 +191,34 @@ class DownloadsTest {
         val e = episode("q4")
         runBlocking { repo.enqueue(e) }
         assertFalse(downloading(e))
+    }
+
+    @Test
+    fun waitingDownloadsSayWhyAndCanGoAheadOverMobileData() {
+        val a = episode("w1")
+        val b = episode("w2")
+        fun progress() = runBlocking { downloads.progress.first() }
+
+        // "Nur im WLAN" (the default): both wait for Wi-Fi.
+        downloads.enqueue(listOf(a, b))
+        assertEquals(DownloadProgress.Waiting.WIFI, progress()[a]?.waiting)
+        assertEquals(DownloadProgress.Waiting.WIFI, progress()[b]?.waiting)
+        assertFalse(progress()[a]!!.running)
+
+        // One of them now, over mobile data: it waits for any network only.
+        runBlocking { downloads.downloadNow(a) }
+        assertEquals(DownloadProgress.Waiting.NETWORK, progress()[a]?.waiting)
+        assertEquals(DownloadProgress.Waiting.WIFI, progress()[b]?.waiting)
+
+        // The setting switched off: the waiting one follows at once.
+        context.container.settings.update { it.copy(downloadWifiOnly = false) }
+        runBlocking { downloads.followNetworkSetting() }
+        assertEquals(DownloadProgress.Waiting.NETWORK, progress()[b]?.waiting)
+
+        // Switched on again: the one let over mobile data by hand stays so.
+        context.container.settings.update { it.copy(downloadWifiOnly = true) }
+        runBlocking { downloads.followNetworkSetting() }
+        assertEquals(DownloadProgress.Waiting.NETWORK, progress()[a]?.waiting)
+        assertEquals(DownloadProgress.Waiting.WIFI, progress()[b]?.waiting)
     }
 }

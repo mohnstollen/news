@@ -50,6 +50,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.mohnstollen.news.playback.DownloadProgress
 import io.github.mohnstollen.news.playback.Episodes
 import kotlinx.coroutines.launch
 
@@ -109,6 +110,19 @@ fun QueueScreen(onBack: (() -> Unit)?, onOpenArticle: (Long) -> Unit) {
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
+                // Downloads wait although there is a network: say what Android holds them back for.
+                val waitsForNetwork = progress.values.any {
+                    it.waiting == DownloadProgress.Waiting.NETWORK || it.waiting == DownloadProgress.Waiting.WIFI
+                }
+                val blocker = remember(progress) { if (waitsForNetwork) downloads.blocker() else null }
+                if (blocker != null) {
+                    Text(
+                        blocker,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             }
             itemsIndexed(items, key = { _, it -> it.id }) { index, item ->
@@ -148,8 +162,9 @@ fun QueueScreen(onBack: (() -> Unit)?, onOpenArticle: (Long) -> Unit) {
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        // The length first: the podcast's name is often long and gets cut off.
+                        // A download's state first, then the length: the podcast's name is often long and gets cut off.
                         val details = listOfNotNull(
+                            progress[item.id]?.let(::downloadStatus),
                             Episodes.label(item.durationSeconds, item.playPosition, 0) ?: "Länge unbekannt",
                             item.feedTitle,
                         )
@@ -219,4 +234,12 @@ private fun QueueSwipe(onToEnd: () -> Unit, onRemove: () -> Unit, content: @Comp
             }
         },
     ) { content() }
+}
+
+/** A download in words, for the queue's rows. */
+internal fun downloadStatus(download: DownloadProgress): String = when (download.waiting) {
+    DownloadProgress.Waiting.TURN -> "wartet auf den Download davor"
+    DownloadProgress.Waiting.WIFI -> "wartet auf WLAN"
+    DownloadProgress.Waiting.NETWORK -> "wartet auf Netz"
+    null -> download.fraction?.let { "lädt ${(it * 100).toInt()} %" } ?: "lädt"
 }

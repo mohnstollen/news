@@ -167,6 +167,8 @@ class SyncManager(
     private val client: OkHttpClient,
     private val settings: SettingsStore,
     private val repository: Repository,
+    /** Podfang only: subscriptions and listening positions with gPodder Sync, too. */
+    private val gpodder: GpodderSync? = null,
 ) {
     private val mutex = Mutex()
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = true }
@@ -199,9 +201,10 @@ class SyncManager(
                 dav.put(stateUrl, json.encodeToString(SyncState.serializer(), merged), "application/json")
                 // A plain OPML copy, so the subscriptions are usable with other apps too.
                 dav.put(DavUrls.child(folder, OPML_FILE), repository.exportOpml(), "text/x-opml")
+                val fromGpodder = gpodderRound(prefs, login)
 
                 settings.update { it.copy(lastSync = System.currentTimeMillis(), lastSyncError = null) }
-                added
+                added + fromGpodder
             } catch (e: Exception) {
                 val message = when (e) {
                     is SyncException -> e.message!!
@@ -211,6 +214,28 @@ class SyncManager(
                 settings.update { it.copy(lastSyncError = message) }
                 throw SyncException(message, e)
             }
+        }
+    }
+
+    /**
+     * The gPodder Sync part, if wanted. Its trouble (above all: the app missing on the server) is
+     * noted on its own and does not fail the rest of the sync.
+     */
+    private suspend fun gpodderRound(prefs: Prefs, login: String): Int {
+        val sync = gpodder ?: return 0
+        if (!prefs.gpodderSync) return 0
+        return try {
+            val api = GpodderClient(client, prefs.ncServer, login, settings.ncPassword)
+            sync.sync(api, "$login@${prefs.ncServer.trim()}").also { settings.update { it.copy(gpodderStatus = null) } }
+        } catch (e: Exception) {
+            val message = when (e) {
+                is GpodderMissingException, is SyncException -> e.message!!
+                is IOException -> "gPodder Sync nicht erreichbar: ${e.message ?: e.javaClass.simpleName}"
+                is kotlinx.serialization.SerializationException -> "gPodder Sync: unerwartete Antwort des Servers"
+                else -> throw e
+            }
+            settings.update { it.copy(gpodderStatus = message) }
+            0
         }
     }
 

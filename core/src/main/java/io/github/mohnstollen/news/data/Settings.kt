@@ -53,6 +53,18 @@ data class Prefs(
     val queueDownloads: Boolean = true,
     /** Next to play/pause on the lock screen: back 10 s / forward 30 s instead of previous/next episode. */
     val lockScreenSeek: Boolean = false,
+    /** Podfang: also sync subscriptions and listening positions with gPodder Sync on the Nextcloud. */
+    val gpodderSync: Boolean = true,
+    /** Outcome of the last gPodder Sync round: null if it went well, else why not. */
+    val gpodderStatus: String? = null,
+    /** Look for a new version of the app on GitHub once a day. */
+    val updateCheck: Boolean = true,
+    val lastUpdateCheck: Long = 0,
+    /** A newer version found by the last check, and where to get it; null if none. */
+    val updateVersion: String? = null,
+    val updateUrl: String? = null,
+    /** The version last announced by a notification, so it is announced once. */
+    val updateNotified: String? = null,
 ) {
     val syncConfigured: Boolean get() = ncServer.isNotBlank() && ncUser.isNotBlank()
 }
@@ -98,6 +110,13 @@ class SettingsStore(context: Context, private val defaults: Prefs = Prefs()) {
             downloadEnqueues = sp.getBoolean("downloadEnqueues", d.downloadEnqueues),
             queueDownloads = sp.getBoolean("queueDownloads", d.queueDownloads),
             lockScreenSeek = sp.getBoolean("lockScreenSeek", d.lockScreenSeek),
+            gpodderSync = sp.getBoolean("gpodderSync", d.gpodderSync),
+            gpodderStatus = sp.getString("gpodderStatus", d.gpodderStatus),
+            updateCheck = sp.getBoolean("updateCheck", d.updateCheck),
+            lastUpdateCheck = sp.getLong("lastUpdateCheck", d.lastUpdateCheck),
+            updateVersion = sp.getString("updateVersion", d.updateVersion),
+            updateUrl = sp.getString("updateUrl", d.updateUrl),
+            updateNotified = sp.getString("updateNotified", d.updateNotified),
         )
     }
 
@@ -130,6 +149,13 @@ class SettingsStore(context: Context, private val defaults: Prefs = Prefs()) {
             .putBoolean("downloadEnqueues", p.downloadEnqueues)
             .putBoolean("queueDownloads", p.queueDownloads)
             .putBoolean("lockScreenSeek", p.lockScreenSeek)
+            .putBoolean("gpodderSync", p.gpodderSync)
+            .putString("gpodderStatus", p.gpodderStatus)
+            .putBoolean("updateCheck", p.updateCheck)
+            .putLong("lastUpdateCheck", p.lastUpdateCheck)
+            .putString("updateVersion", p.updateVersion)
+            .putString("updateUrl", p.updateUrl)
+            .putString("updateNotified", p.updateNotified)
             .apply()
         _flow.value = p
     }
