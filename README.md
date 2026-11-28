@@ -85,7 +85,8 @@ sie nicht brauchen.
   (0,8× bis 2×, auch direkt in der Folge umschaltbar), 10 s zurück / 30 s vor, Steuerung über
   Benachrichtigung, Sperrbildschirm, Kopfhörer und Bluetooth. Auf dem Sperrbildschirm und in der
   Benachrichtigung: vorherige/nächste Folge (aus der Warteschlange), 10 s zurück und 30 s vor; welches
-  Paar neben Play liegt, ist einstellbar (manche Handys zeigen dort nur zwei Knöpfe). Jede Folge merkt
+  Paar neben Play liegt, ist einstellbar (manche Handys zeigen dort nur zwei Knöpfe); zurück liegt immer links
+  von vor, wie im Player der App. Jede Folge merkt
   sich, wo sie aufgehört hat; zu Ende gehörte Folgen gelten als gelesen
 - **Android Auto**: Warteschlange, Neu und Podcasts (als Cover-Raster) zum Durchblättern, mit Cover,
   Restzeit und Hörfortschritt; Abspielen wie in der App (gespeicherte Stelle, oben in die Warteschlange),

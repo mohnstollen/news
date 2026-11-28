@@ -14,7 +14,8 @@ import androidx.media3.session.SessionCommands
  * The buttons of the notification and the lock screen. Android puts two of them next to play/pause
  * and may show more beside them; some devices (e.g. Xiaomi) show only those two on the lock screen.
  * [seekMain] chooses which pair gets the places next to play/pause: false = previous/next
- * episode, true = back 10 s / forward 30 s (to skip ads). The other pair comes after.
+ * episode, true = back 10 s / forward 30 s (to skip ads). The other pair comes after. Back is
+ * always left of forward, as in the app's player.
  */
 @OptIn(UnstableApi::class)
 object LockScreenControls {
@@ -58,10 +59,12 @@ object LockScreenControls {
                 button(CommandButton.ICON_PREVIOUS, PREVIOUS_EPISODE, "Vorherige Folge", CommandButton.SLOT_OVERFLOW),
             )
         } else {
-            // Previous/next take their places through the player commands; 30 s first, it skips ads.
+            // Previous/next take their places through the player commands. Back before forward:
+            // the lock screen (e.g. Xiaomi) puts the first one left and the second right, as in
+            // the app's player, so forward 30 s (to skip ads) is under the thumb.
             listOf(
-                button(CommandButton.ICON_SKIP_FORWARD_30, SEEK_FORWARD, forward, CommandButton.SLOT_OVERFLOW),
                 button(CommandButton.ICON_SKIP_BACK_10, SEEK_BACK, back, CommandButton.SLOT_OVERFLOW),
+                button(CommandButton.ICON_SKIP_FORWARD_30, SEEK_FORWARD, forward, CommandButton.SLOT_OVERFLOW),
             )
         }
     }

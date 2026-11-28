@@ -272,9 +272,9 @@ class PlaybackServiceTest {
     @Test
     fun lockScreenButtonsInBothLayouts() {
         val episodes = io.github.mohnstollen.news.playback.LockScreenControls
-        // Previous/next episode next to play: the 10 s and 30 s buttons come after, 30 s first.
+        // Previous/next episode next to play: the 10 s and 30 s buttons come after, back left of forward.
         val episodesFirst = episodes.buttons(seekMain = false)
-        assertEquals(listOf("podfang.SEEK_FORWARD", "podfang.SEEK_BACK"), episodesFirst.map { it.sessionCommand!!.customAction })
+        assertEquals(listOf("podfang.SEEK_BACK", "podfang.SEEK_FORWARD"), episodesFirst.map { it.sessionCommand!!.customAction })
         assertTrue(episodesFirst.all { it.slots.get(0) == androidx.media3.session.CommandButton.SLOT_OVERFLOW })
         assertTrue(episodes.notificationPlayerCommands(false).contains(androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT))
         // 10 s / 30 s next to play: they take those places, the episode buttons follow.
